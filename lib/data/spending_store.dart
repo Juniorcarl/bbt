@@ -3,7 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'statement_parser.dart';
 
+/// One row of the month-by-month breakdown.
+class MonthSummary {
+  final DateTime month;
+  final double spent;
+  final double income;
+  final int count;
+  const MonthSummary(this.month, this.spent, this.income, this.count);
+  double get net => income - spent;
+}
+
 /// Holds the uploaded statement and works out every number the screens show.
+///
+/// The screens look at a *period*: either one month, or all months in the
+/// statement ([allMonths]). Multi-month statements open on "All months".
 class SpendingStore extends ChangeNotifier {
   List<Txn> _txns = const [];
   String? bank;
@@ -11,7 +24,7 @@ class SpendingStore extends ChangeNotifier {
   String? sourceName;
   double? closingBalance;
   bool isSample = false;
-  DateTime? _month;
+  DateTime? _month; // null = all months
 
   List<Txn> get txns => _txns;
   bool get hasData => _txns.isNotEmpty;
@@ -23,7 +36,8 @@ class SpendingStore extends ChangeNotifier {
     closingBalance = s.closingBalance;
     sourceName = name;
     isSample = sample;
-    _month = months.isEmpty ? null : months.first;
+    final ms = months;
+    _month = ms.length == 1 ? ms.first : null;
     notifyListeners();
   }
 
@@ -35,7 +49,7 @@ class SpendingStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ---- Months ------------------------------------------------------------
+  // ---- Period selection --------------------------------------------------
 
   /// Months that have transactions, newest first.
   List<DateTime> get months {
@@ -43,18 +57,54 @@ class SpendingStore extends ChangeNotifier {
     return set.toList()..sort((a, b) => b.compareTo(a));
   }
 
-  DateTime get month => _month ?? DateTime(DateTime.now().year, DateTime.now().month);
+  int get monthCount => months.length;
+  bool get isMultiMonth => monthCount > 1;
+
+  bool get allMonths => _month == null;
+
+  /// Selected month. When "All months" is selected this is the latest month.
+  DateTime get month {
+    if (_month != null) return _month!;
+    final ms = months;
+    return ms.isEmpty ? DateTime(DateTime.now().year, DateTime.now().month) : ms.first;
+  }
+
   set month(DateTime m) {
     _month = DateTime(m.year, m.month);
     notifyListeners();
   }
 
+  void selectAllMonths() {
+    _month = null;
+    notifyListeners();
+  }
+
+  /// First and last transaction dates in the statement.
+  (DateTime, DateTime)? get dateRange => _txns.isEmpty ? null : (_txns.last.date, _txns.first.date);
+
+  /// "Aug – Oct 2026" or "October 2026".
+  String get periodLabel {
+    if (!allMonths) return monthYear(month);
+    final ms = months;
+    if (ms.isEmpty) return '';
+    if (ms.length == 1) return monthYear(ms.first);
+    final first = ms.last, last = ms.first;
+    return first.year == last.year
+        ? '${monthShort(first)} – ${monthShort(last)} ${last.year}'
+        : '${monthShort(first)} ${first.year} – ${monthShort(last)} ${last.year}';
+  }
+
+  /// Word used in labels: "October" or "Total".
+  String get periodName => allMonths && isMultiMonth ? 'Total' : monthLong(month);
+
   bool _inMonth(Txn t, DateTime m) => t.date.year == m.year && t.date.month == m.month;
 
   List<Txn> txnsIn(DateTime m) => _txns.where((t) => _inMonth(t, m)).toList();
-  List<Txn> get monthTxns => txnsIn(month);
 
-  /// "Today" for filters = the last day with data in the selected month
+  /// Transactions in the selected period (one month, or everything).
+  List<Txn> get monthTxns => allMonths ? _txns : txnsIn(month);
+
+  /// "Today" for filters = the last day with data in the selected period
   /// (statements are always in the past, so the real today is usually empty).
   DateTime get refDate {
     final list = monthTxns;
@@ -65,16 +115,34 @@ class SpendingStore extends ChangeNotifier {
 
   // ---- Totals ------------------------------------------------------------
 
-  double spentIn(DateTime m) => txnsIn(m).where((t) => t.amount < 0).fold(0.0, (a, t) => a - t.amount);
-  double incomeIn(DateTime m) => txnsIn(m).where((t) => t.amount > 0).fold(0.0, (a, t) => a + t.amount);
+  double _spent(Iterable<Txn> l) => l.where((t) => t.amount < 0).fold(0.0, (a, t) => a - t.amount);
+  double _income(Iterable<Txn> l) => l.where((t) => t.amount > 0).fold(0.0, (a, t) => a + t.amount);
 
-  double get monthSpent => spentIn(month);
-  double get monthIncome => incomeIn(month);
+  double spentIn(DateTime m) => _spent(txnsIn(m));
+  double incomeIn(DateTime m) => _income(txnsIn(m));
+
+  /// Spending in the selected period.
+  double get monthSpent => _spent(monthTxns);
+  double get monthIncome => _income(monthTxns);
+
+  /// Months the selected period spans (for averages).
+  int get periodMonths => allMonths ? (monthCount == 0 ? 1 : monthCount) : 1;
+
+  double get avgMonthlySpent => monthSpent / periodMonths;
+  double get avgMonthlyIncome => monthIncome / periodMonths;
+
+  /// Month-by-month totals, oldest first.
+  List<MonthSummary> get monthSummaries => [for (final m in months.reversed) _summary(m)];
+
+  MonthSummary _summary(DateTime m) {
+    final l = txnsIn(m);
+    return MonthSummary(m, _spent(l), _income(l), l.length);
+  }
 
   DateTime get _prevMonth => DateTime(month.year, month.month - 1);
 
   /// Whether the statement covers (almost) the whole month, so comparisons are fair.
-  bool _coversMonth(DateTime m) {
+  bool coversMonth(DateTime m) {
     if (_txns.isEmpty) return false;
     final earliest = _txns.last.date;
     final latest = _txns.first.date;
@@ -82,16 +150,18 @@ class SpendingStore extends ChangeNotifier {
         !latest.isBefore(DateTime(m.year, m.month + 1, 0).subtract(const Duration(days: 4)));
   }
 
-  /// Fractional change vs last month (-0.12 = 12% less). Null if we can't compare fairly.
+  /// Fractional change vs last month (-0.12 = 12% less). Null in "All months"
+  /// or when we can't compare fairly.
   double? get changeVsPrev {
+    if (allMonths) return null;
     final prev = _prevMonth;
-    if (!_coversMonth(prev)) return null;
+    if (!coversMonth(prev)) return null;
     final p = spentIn(prev);
     if (p == 0) return null;
     return (monthSpent - p) / p;
   }
 
-  /// Spending per category this month, biggest first. Income excluded.
+  /// Spending per category in the period, biggest first. Income excluded.
   Map<Cat, double> get categorySpend {
     final m = <Cat, double>{};
     for (final t in monthTxns) {
@@ -115,13 +185,26 @@ class SpendingStore extends ChangeNotifier {
         }
         return out;
       case 'Weekly':
+        if (allMonths) {
+          // 7-day buckets across the whole statement, at most the last 13.
+          final range = dateRange;
+          if (range == null) return {};
+          final start = DateTime(range.$1.year, range.$1.month, range.$1.day);
+          final end = DateTime(range.$2.year, range.$2.month, range.$2.day);
+          final weeks = end.difference(start).inDays ~/ 7 + 1;
+          final out = <String, double>{};
+          for (var w = (weeks - 13).clamp(0, weeks); w < weeks; w++) {
+            final from = start.add(Duration(days: w * 7));
+            final to = from.add(const Duration(days: 7));
+            out['W${w + 1}'] = _spent(_txns.where((t) => !t.date.isBefore(from) && t.date.isBefore(to)));
+          }
+          return out;
+        }
         final lastDay = monthTxns.isEmpty ? 0 : refDate.day;
         final out = <String, double>{};
         for (var w = 0; w * 7 + 1 <= lastDay; w++) {
           final from = w * 7 + 1, to = w * 7 + 7;
-          out['Wk ${w + 1}'] = monthTxns
-              .where((t) => t.amount < 0 && t.date.day >= from && t.date.day <= to)
-              .fold(0.0, (a, t) => a - t.amount);
+          out['Wk ${w + 1}'] = _spent(monthTxns.where((t) => t.date.day >= from && t.date.day <= to));
         }
         return out;
       default: // Monthly
@@ -130,27 +213,44 @@ class SpendingStore extends ChangeNotifier {
     }
   }
 
-  double _spentOn(DateTime d) => _txns
-      .where((t) => t.amount < 0 && t.date.year == d.year && t.date.month == d.month && t.date.day == d.day)
-      .fold(0.0, (a, t) => a - t.amount);
+  double _spentOn(DateTime d) => _spent(
+      _txns.where((t) => t.date.year == d.year && t.date.month == d.month && t.date.day == d.day));
 
   // ---- Plain-language summary -----------------------------------------
 
   String get insight {
     if (!hasData) return 'Upload a statement to see where your money goes.';
     final spent = monthSpent;
-    if (spent == 0) return 'No spending recorded in ${monthLong(month)}.';
-    final change = changeVsPrev;
+    if (spent == 0) return 'No spending recorded in $periodLabel.';
     final cats = categorySpend;
     final top = cats.entries.first;
     final topShare = (top.value / spent * 100).round();
     final topLine = '${top.key.label} is your biggest category at $topShare% (${pula(top.value, decimals: false)}).';
+
+    if (allMonths && isMultiMonth) {
+      final sums = monthSummaries;
+      final highest = sums.reduce((a, b) => a.spent >= b.spent ? a : b);
+      return 'Over $monthCount months you spent ${pula(spent, decimals: false)}, '
+          'about ${pula(avgMonthlySpent, decimals: false)} a month. '
+          '${monthLong(highest.month)} was the highest at ${pula(highest.spent, decimals: false)}. $topLine';
+    }
+
+    final change = changeVsPrev;
     if (change == null) return topLine;
     final pct = (change.abs() * 100).round();
     if (pct == 0) return 'Same spending as last month. $topLine';
     return change < 0
         ? "You've spent $pct% less than last month. $topLine"
         : "You've spent $pct% more than last month. $topLine";
+  }
+
+  /// Shown after an upload so the user can check the dates were read right.
+  String get loadSummary {
+    final r = dateRange;
+    if (r == null) return 'No transactions found';
+    final n = monthCount;
+    return '${_txns.length} transactions · ${shortDate(r.$1)} ${r.$1.year} – ${shortDate(r.$2)} ${r.$2.year}'
+        ' ($n month${n == 1 ? '' : 's'})';
   }
 }
 

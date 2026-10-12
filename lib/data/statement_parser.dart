@@ -218,6 +218,31 @@ int _likelyYear(String text) {
   return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
 }
 
+/// Earliest fully written date anywhere in the text (usually the statement
+/// period start). Used to give a year to dates printed as "05 Oct".
+DateTime? _earliestFullDate(String text) {
+  final found = <DateTime>[];
+  void consider(DateTime? d) {
+    if (d != null) found.add(d);
+  }
+
+  for (final m in RegExp(r'\b(\d{1,2})[ \-/.]?([A-Za-z]{3,9})[ \-/.,]*(20\d{2})\b').allMatches(text)) {
+    final mon = _monthNums[m[2]!.substring(0, 3).toLowerCase()];
+    if (mon != null) consider(_mk(int.parse(m[3]!), mon, int.parse(m[1]!)));
+  }
+  for (final m in RegExp(r'\b(\d{1,2})[/\-.](\d{1,2})[/\-.](20\d{2})\b').allMatches(text)) {
+    consider(_mk(int.parse(m[3]!), int.parse(m[2]!), int.parse(m[1]!)));
+  }
+  for (final m in RegExp(r'\b(20\d{2})[/\-.](\d{1,2})[/\-.](\d{1,2})\b').allMatches(text)) {
+    consider(_mk(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!)));
+  }
+  if (found.isEmpty) return null;
+  // Ignore old dates (date of birth, account opened…): keep the last ~13 months.
+  final latest = found.reduce((a, b) => a.isAfter(b) ? a : b);
+  final cutoff = latest.subtract(const Duration(days: 400));
+  return found.where((d) => !d.isBefore(cutoff)).reduce((a, b) => a.isBefore(b) ? a : b);
+}
+
 const _balanceMarkers = [
   'opening balance', 'closing balance', 'balance brought forward', 'balance carried forward',
   'brought forward', 'carried forward', 'balance b/f', 'balance c/f', 'bal b/f', 'bal c/f',
@@ -234,6 +259,7 @@ const _headerWords = ['date', 'description', 'details', 'balance', 'debit', 'cre
 /// is the running balance, which also tells us whether money went in or out.
 ParsedStatement parseStatementText(String text) {
   final year = _likelyYear(text);
+  final periodStart = _earliestFullDate(text);
   final txns = <Txn>[];
   double? prevBalance;
   double? lastBalance;
@@ -264,8 +290,15 @@ ParsedStatement parseStatementText(String text) {
     final second = _dateAtStart(rest, date.year);
     if (second != null) rest = rest.substring(second.$2).trim();
 
-    // Year roll-over for "28 Dec … 03 Jan" statements without years.
-    if (!first.$3 && lastMonth != null && date.month < lastMonth - 6) {
+    if (!first.$3 && periodStart != null) {
+      // No year printed: place the date inside the statement period
+      // (e.g. period 15 Nov 2025 – 14 Jan 2026 → "03 Jan" is 2026).
+      date = DateTime(periodStart.year, date.month, date.day);
+      if (date.isBefore(periodStart.subtract(const Duration(days: 7)))) {
+        date = DateTime(date.year + 1, date.month, date.day);
+      }
+    } else if (!first.$3 && lastMonth != null && date.month < lastMonth - 6) {
+      // Year roll-over for "28 Dec … 03 Jan" when no period is printed.
       yearShift++;
       date = DateTime(date.year + 1, date.month, date.day);
     }

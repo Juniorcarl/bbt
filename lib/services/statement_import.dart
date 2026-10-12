@@ -31,7 +31,8 @@ Future<void> importStatement(BuildContext context) async {
       final parsed = parseStatement(bytes, file.name, password: password);
       store.load(parsed, file.name);
       messenger.showSnackBar(SnackBar(
-        content: Text('Read ${parsed.txns.length} transactions from ${file.name}'),
+        content: Text('Read ${store.loadSummary}'),
+        duration: const Duration(seconds: 6),
       ));
       return;
     } on StatementPasswordRequired catch (e) {

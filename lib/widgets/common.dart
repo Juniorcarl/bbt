@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../data/models.dart';
+import '../data/spending_store.dart';
 import '../theme/app_theme.dart';
 
 class BCard extends StatelessWidget {
@@ -146,4 +147,90 @@ class EmptyState extends StatelessWidget {
               textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppColors.muted)),
         ]),
       );
+}
+
+/// [All 3 months] [Aug] [Sep] [Oct] — picks the period every screen shows.
+class MonthChips extends StatelessWidget {
+  const MonthChips({super.key});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: store,
+        builder: (context, _) {
+          final ms = store.months.reversed.toList(); // oldest first
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              ChoiceChip(
+                label: Text('All ${ms.length} months'),
+                selected: store.allMonths,
+                onSelected: (_) => store.selectAllMonths(),
+              ),
+              for (final m in ms)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: ChoiceChip(
+                    label: Text(ms.first.year == ms.last.year ? monthLong(m) : '${monthShort(m)} ${m.year}'),
+                    selected: !store.allMonths && store.month == m,
+                    onSelected: (_) => store.month = m,
+                  ),
+                ),
+            ]),
+          );
+        },
+      );
+}
+
+/// Month-by-month spending and money in. Tap a row to open that month.
+class MonthBreakdown extends StatelessWidget {
+  const MonthBreakdown({super.key});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(listenable: store, builder: (context, _) => _build());
+
+  Widget _build() {
+    final sums = store.monthSummaries;
+    final maxSpent = sums.fold(0.0, (a, s) => s.spent > a ? s.spent : a);
+    return BCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Month by month',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
+        const SizedBox(height: 4),
+        Text('Average ${pula(store.avgMonthlySpent, decimals: false)} spent a month',
+            style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+        const SizedBox(height: 8),
+        for (final s in sums)
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => store.month = s.month,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Column(children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(
+                      store.coversMonth(s.month) ? monthYear(s.month) : '${monthYear(s.month)} (part)',
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+                    ),
+                  ),
+                  Text(pula(-s.spent, decimals: false), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 12),
+                  Text(pula(s.income, sign: true, decimals: false),
+                      style: const TextStyle(color: AppColors.income, fontSize: 12)),
+                ]),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: maxSpent == 0 ? 0.0 : s.spent / maxSpent,
+                    minHeight: 6,
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.08),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+      ]),
+    );
+  }
 }

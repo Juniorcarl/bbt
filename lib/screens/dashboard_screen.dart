@@ -5,7 +5,6 @@ import '../data/spending_store.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
-import 'home_screen.dart' show MonthPicker;
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -15,7 +14,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  String _mode = 'Daily';
+  String _mode = 'Monthly';
 
   @override
   Widget build(BuildContext context) {
@@ -23,10 +22,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       listenable: store,
       builder: (context, _) => SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
-          Row(children: [
-            const Expanded(child: SectionTitle('Spending')),
-            if (store.hasData) const MonthPicker(),
-          ]),
+          SectionTitle('Spending', subtitle: store.hasData ? store.periodLabel : null),
+          if (store.isMultiMonth) ...[
+            const SizedBox(height: 12),
+            const MonthChips(),
+          ],
           const SizedBox(height: 16),
           if (!store.hasData)
             EmptyState(onUpload: () => importStatement(context), onSample: loadSample)
@@ -47,7 +47,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return [
       BCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Total spent', style: TextStyle(color: AppColors.muted)),
+          Text(store.allMonths && store.isMultiMonth ? 'Total spent over ${store.monthCount} months' : 'Total spent',
+              style: const TextStyle(color: AppColors.muted)),
           FittedBox(
             child: Text(pula(store.monthSpent),
                 style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.ink)),
@@ -58,6 +59,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               '${(change.abs() * 100).round()}% ${change <= 0 ? 'less' : 'more'} than last month',
               style: TextStyle(color: change <= 0 ? AppColors.income : const Color(0xFFD0573F)),
             )
+          else if (store.allMonths && store.isMultiMonth)
+            Text('About ${pula(store.avgMonthlySpent, decimals: false)} a month · ${store.monthTxns.length} transactions',
+                style: const TextStyle(color: AppColors.muted))
           else
             Text('${store.monthTxns.length} transactions in ${monthLong(store.month)}',
                 style: const TextStyle(color: AppColors.muted)),

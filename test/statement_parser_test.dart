@@ -101,6 +101,42 @@ Date;Details;Amount
     });
   });
 
+  group('multi-month statements', () {
+    const threeMonths = '''
+Statement period: 15 Nov 2025 to 14 Feb 2026
+Date of birth: 01 Jan 1998
+16 Nov Choppies 100.00Dr 900.00
+20 Dec Salary 1,000.00Cr 1,900.00
+28 Dec Uber 50.00Dr 1,850.00
+03 Jan Spar 200.00Dr 1,650.00
+10 Feb Mascom 30.00Dr 1,620.00
+''';
+
+    test('dates without a year land in the statement period', () {
+      final s = parseStatementText(threeMonths);
+      expect(s.txns.map((t) => t.date), [
+        DateTime(2025, 11, 16),
+        DateTime(2025, 12, 20),
+        DateTime(2025, 12, 28),
+        DateTime(2026, 1, 3),
+        DateTime(2026, 2, 10),
+      ]);
+    });
+
+    test('store opens on all months with a breakdown', () {
+      final store = SpendingStore()..load(parseStatementText(threeMonths), 'test');
+      expect(store.monthCount, 4);
+      expect(store.allMonths, isTrue);
+      expect(store.monthSpent, 380.00);
+      expect(store.monthSummaries.map((m) => m.spent), [100.00, 50.00, 200.00, 30.00]);
+      store.month = DateTime(2025, 12);
+      expect(store.monthSpent, 50.00);
+      expect(store.monthIncome, 1000.00);
+      store.selectAllMonths();
+      expect(store.monthIncome, 1000.00);
+    });
+  });
+
   test('store totals by month', () {
     final store = SpendingStore();
     store.load(parseStatementText('''

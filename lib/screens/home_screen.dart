@@ -82,11 +82,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _content(BuildContext context) {
     final list = _filtered;
     final shown = _showAll ? list : list.take(10).toList();
-    final month = store.month;
     return [
       Row(children: [
-        const MonthPicker(),
-        const Spacer(),
+        Expanded(
+          child: Text(store.periodLabel,
+              style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink)),
+        ),
         FilledButton.icon(
           onPressed: () => importStatement(context),
           icon: const Icon(Icons.upload_outlined, size: 18),
@@ -99,13 +100,17 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Text('Showing sample data — upload your own statement to replace it.',
               style: TextStyle(fontSize: 12, color: AppColors.muted)),
         ),
+      if (store.isMultiMonth) ...[
+        const SizedBox(height: 12),
+        const MonthChips(),
+      ],
       const SizedBox(height: 16),
       const _AccountCard(),
       const SizedBox(height: 14),
       Row(children: [
-        Expanded(child: _MiniStat('${monthLong(month)} spending', store.monthSpent)),
+        Expanded(child: _MiniStat('${store.periodName} spending', store.monthSpent)),
         const SizedBox(width: 12),
-        Expanded(child: _MiniStat('${monthLong(month)} money in', store.monthIncome)),
+        Expanded(child: _MiniStat('${store.periodName} money in', store.monthIncome)),
       ]),
       const SizedBox(height: 14),
       BCard(
@@ -117,6 +122,10 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(child: Text(store.insight, style: const TextStyle(color: AppColors.ink))),
         ]),
       ),
+      if (store.allMonths && store.isMultiMonth) ...[
+        const SizedBox(height: 14),
+        const MonthBreakdown(),
+      ],
       const SizedBox(height: 14),
       BCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -142,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Period.today => 'Last day',
                       Period.yesterday => 'Day before',
                       Period.week => 'Last 7 days',
-                      Period.month => 'Whole month',
+                      Period.month => store.allMonths && store.isMultiMonth ? 'Everything' : 'Whole month',
                       Period.custom => 'Custom',
                     }),
                     selected: _period == p,
@@ -172,32 +181,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     ];
   }
-}
-
-/// "October 2026 ▾" — switches between the months in the statement.
-class MonthPicker extends StatelessWidget {
-  const MonthPicker({super.key});
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(listenable: store, builder: (context, _) => _build());
-
-  Widget _build() => PopupMenuButton<DateTime>(
-        onSelected: (m) => store.month = m,
-        itemBuilder: (_) => [for (final m in store.months) PopupMenuItem(value: m, child: Text(monthYear(m)))],
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFC9D6E3)),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Text(monthYear(store.month), style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
-            const Icon(Icons.arrow_drop_down, color: AppColors.primary),
-          ]),
-        ),
-      );
 }
 
 class _AccountCard extends StatelessWidget {

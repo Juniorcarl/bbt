@@ -14,11 +14,24 @@ class BudgetScreen extends StatelessWidget {
 
   Widget _build(BuildContext context) {
     final plannedSpending = budgets.values.fold(0.0, (a, b) => a + b);
-    final monthlyIncome = store.monthIncome;
-    final categorySpend = store.categorySpend;
+    // Budgets are monthly, so "All months" compares the monthly average.
+    final perMonth = store.periodMonths;
+    final monthlyIncome = store.monthIncome / perMonth;
+    final categorySpend = {for (final e in store.categorySpend.entries) e.key: e.value / perMonth};
     return SafeArea(
       child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
-        SectionTitle(store.hasData ? '${monthLong(store.month)} Budget' : 'Budget'),
+        SectionTitle(
+          store.allMonths && store.isMultiMonth
+              ? 'Monthly Budget'
+              : store.hasData
+                  ? '${monthLong(store.month)} Budget'
+                  : 'Budget',
+          subtitle: store.allMonths && store.isMultiMonth ? 'Average of ${store.periodLabel}' : null,
+        ),
+        if (store.isMultiMonth) ...[
+          const SizedBox(height: 12),
+          const MonthChips(),
+        ],
         const SizedBox(height: 16),
         if (!store.hasData)
           EmptyState(onUpload: () => importStatement(context), onSample: loadSample)
