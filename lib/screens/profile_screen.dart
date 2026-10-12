@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../data/smart_categorizer.dart';
+import '../data/spending_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 
@@ -9,7 +11,6 @@ class ProfileScreen extends StatelessWidget {
     'Account': ['Personal Information', 'Connected Bank Statements', 'Statement History'],
     'Preferences': ['Currency', 'Notifications', 'Dark Mode'],
     'Privacy & Security': ['Data Privacy', 'Delete Data', 'Security'],
-    'AI & Categorization': ['Automatic Categorization', 'Category Preferences', 'Review Categorization History'],
   };
 
   @override
@@ -38,6 +39,45 @@ class ProfileScreen extends StatelessWidget {
             ]),
           ),
         ],
+        const Padding(
+          padding: EdgeInsets.fromLTRB(4, 8, 0, 8),
+          child: Text('AI & Categorization', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.muted)),
+        ),
+        ListenableBuilder(
+          listenable: store,
+          builder: (context, _) => BCard(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              ListTile(
+                leading: const Icon(Icons.auto_awesome, color: AppColors.primary),
+                title: const Text('What bbt has learned'),
+                subtitle: Text(categorizer.examplesLearned == 0
+                    ? 'Tap any transaction to correct its category. bbt learns from every correction.'
+                    : '${categorizer.merchantsLearned} merchants remembered · '
+                        '${categorizer.examplesLearned} corrections learned'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.restart_alt),
+                title: const Text('Reset learning'),
+                enabled: categorizer.examplesLearned > 0,
+                onTap: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Reset learning?'),
+                      content: const Text('bbt will forget every category you taught it.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reset')),
+                      ],
+                    ),
+                  );
+                  if (ok == true) await store.resetLearning();
+                },
+              ),
+            ]),
+          ),
+        ),
       ]),
     );
   }

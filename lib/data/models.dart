@@ -37,6 +37,14 @@ extension CatX on Cat {
       }[this]!;
 }
 
+/// Where a transaction's category came from.
+enum CatSource {
+  rule, // built-in keyword list
+  model, // learned guess (Naive Bayes)
+  user, // the user picked it (or taught it for this merchant)
+  none, // nothing matched
+}
+
 class Txn {
   final String name;
   final Cat cat;
@@ -44,8 +52,17 @@ class Txn {
   final DateTime date;
   final double amount; // negative = expense
   final String raw; // description exactly as printed on the statement
-  const Txn(this.name, this.cat, this.sub, this.date, this.amount, {this.raw = ''});
+  final CatSource source;
+  final double confidence; // 0..1, for model guesses
+  const Txn(this.name, this.cat, this.sub, this.date, this.amount,
+      {this.raw = '', this.source = CatSource.rule, this.confidence = 1});
   bool get isIncome => amount > 0;
+
+  /// Text the categoriser looks at.
+  String get text => raw.isEmpty ? name : raw;
+
+  Txn withCategory(Cat cat, String sub, CatSource source, [double confidence = 1]) =>
+      Txn(name, cat, sub, date, amount, raw: raw, source: source, confidence: confidence);
 }
 
 /// Botswana pula: -P 87.50, +P 12,000.00

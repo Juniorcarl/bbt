@@ -27,36 +27,126 @@ class BCard extends StatelessWidget {
 
 class TxnTile extends StatelessWidget {
   final Txn t;
-  const TxnTile(this.t, {super.key});
+  final VoidCallback? onTap;
+  const TxnTile(this.t, {super.key, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(color: t.cat.color.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(13)),
-          child: Icon(t.cat.icon, size: 20, color: AppColors.ink),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.name, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
-            Text(t.sub, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-          ]),
-        ),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(
-            pula(t.amount, sign: true),
-            style: TextStyle(fontWeight: FontWeight.w700, color: t.isIncome ? AppColors.income : AppColors.expense),
+    final unknown = t.source == CatSource.none && !t.isIncome;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(color: t.cat.color.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(13)),
+            child: Icon(unknown ? Icons.help_outline : t.cat.icon, size: 20, color: AppColors.ink),
           ),
-          Text(shortDate(t.date), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t.name, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
+              Row(children: [
+                Flexible(
+                  child: Text(
+                    unknown ? 'Tap to choose a category' : t.sub,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: unknown ? AppColors.primary : AppColors.muted),
+                  ),
+                ),
+                if (t.source == CatSource.model) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.auto_awesome, size: 12, color: AppColors.primary),
+                ],
+                if (t.source == CatSource.user) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.check_circle, size: 12, color: AppColors.income),
+                ],
+              ]),
+            ]),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(
+              pula(t.amount, sign: true),
+              style: TextStyle(fontWeight: FontWeight.w700, color: t.isIncome ? AppColors.income : AppColors.expense),
+            ),
+            Text(shortDate(t.date), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ]),
         ]),
-      ]),
+      ),
     );
   }
+}
+
+/// Bottom sheet to correct a transaction's category. The choice teaches the model.
+Future<void> showCategorySheet(BuildContext context, Txn t) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final picked = await showModalBottomSheet<Cat>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(t.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
+          const SizedBox(height: 2),
+          Text('${pula(t.amount, sign: true)} · ${shortDate(t.date)} ${t.date.year}',
+              style: const TextStyle(color: AppColors.muted)),
+          if (t.raw.isNotEmpty && t.raw != t.name)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('On statement: ${t.raw}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(color: const Color(0xFFEAF4FC), borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome, size: 16, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(switch (t.source) {
+                  CatSource.user => 'You taught bbt this one.',
+                  CatSource.model => 'bbt guessed this from what you\'ve taught it (${(t.confidence * 100).round()}% sure).',
+                  CatSource.rule => 'Matched a known merchant keyword.',
+                  CatSource.none => "bbt doesn't recognise this yet.",
+                }, style: const TextStyle(fontSize: 12, color: AppColors.ink)),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          const Text('What is this?', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final c in Cat.values)
+              ChoiceChip(
+                avatar: Icon(c.icon, size: 16),
+                label: Text(c.label),
+                selected: t.cat == c && t.source != CatSource.none,
+                onSelected: (_) => Navigator.pop(ctx, c),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          const Text(
+            'bbt remembers this merchant and learns from it to categorise similar transactions.',
+            style: TextStyle(fontSize: 11, color: AppColors.muted),
+          ),
+        ]),
+      ),
+    ),
+  );
+  if (picked == null) return;
+  final changed = await store.teach(t, picked);
+  final others = changed - (t.cat == picked ? 0 : 1);
+  messenger.showSnackBar(SnackBar(
+    content: Text(others > 0
+        ? 'Learned: ${t.name} → ${picked.label}. Updated $others similar transaction${others == 1 ? '' : 's'}.'
+        : 'Learned: ${t.name} → ${picked.label}.'),
+  ));
 }
 
 class DonutChart extends StatelessWidget {

@@ -126,6 +126,31 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 14),
         const MonthBreakdown(),
       ],
+      if (store.needsReview > 0) ...[
+        const SizedBox(height: 14),
+        BCard(
+          padding: const EdgeInsets.all(14),
+          child: Row(children: [
+            const Icon(Icons.school_outlined, color: AppColors.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "${store.needsReview} transaction${store.needsReview == 1 ? '' : 's'} bbt doesn't recognise yet. "
+                'Teach it once and it learns for next time.',
+                style: const TextStyle(color: AppColors.ink),
+              ),
+            ),
+            TextButton(
+              onPressed: () => setState(() {
+                _cat = Cat.other;
+                _period = Period.month;
+                _showAll = true;
+              }),
+              child: const Text('Review'),
+            ),
+          ]),
+        ),
+      ],
       const SizedBox(height: 14),
       BCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -176,7 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Center(child: Text('No transactions for this filter', style: TextStyle(color: AppColors.muted))),
             )
           else
-            for (final t in shown) TxnTile(t),
+            for (final t in shown) TxnTile(t, onTap: () => showCategorySheet(context, t)),
         ]),
       ),
     ];

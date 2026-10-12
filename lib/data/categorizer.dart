@@ -65,10 +65,25 @@ bool looksLikeIncome(String desc) => _incomeRe.hasMatch(desc);
     if (d.contains('interest')) return (Cat.income, 'Interest');
     return (Cat.income, 'Money in');
   }
+  return ruleMatch(desc) ?? (Cat.other, 'Uncategorised');
+}
+
+/// The first keyword rule that matches, or null.
+(Cat, String)? ruleMatch(String desc) {
   for (final (re, cat, sub) in _ruleRes) {
     if (re.hasMatch(desc)) return (cat, sub);
   }
-  return (Cat.other, 'Uncategorised');
+  return null;
+}
+
+/// Every keyword with its category — used to give the learning model a
+/// starting vocabulary before the user has taught it anything.
+Iterable<(String, Cat)> get ruleSeeds sync* {
+  for (final (words, cat, _) in _rules) {
+    for (final w in words) {
+      yield (w, cat);
+    }
+  }
 }
 
 const _noisePrefixes = [

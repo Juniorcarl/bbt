@@ -344,7 +344,8 @@ ParsedStatement parseStatementText(String text) {
 
 Txn _txn(String desc, DateTime date, double amount) {
   final (cat, sub) = categorize(desc, amount);
-  return Txn(cleanName(desc), cat, sub, date, amount, raw: desc);
+  final source = sub == 'Uncategorised' ? CatSource.none : CatSource.rule;
+  return Txn(cleanName(desc), cat, sub, date, amount, raw: desc, source: source);
 }
 
 // ---------------------------------------------------------------------------

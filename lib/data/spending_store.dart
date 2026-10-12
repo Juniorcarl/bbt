@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'models.dart';
+import 'smart_categorizer.dart';
 import 'statement_parser.dart';
 
 /// One row of the month-by-month breakdown.
@@ -30,7 +31,7 @@ class SpendingStore extends ChangeNotifier {
   bool get hasData => _txns.isNotEmpty;
 
   void load(ParsedStatement s, String name, {bool sample = false}) {
-    _txns = [...s.txns]..sort((a, b) => b.date.compareTo(a.date));
+    _txns = [for (final t in s.txns) _categorise(t)]..sort((a, b) => b.date.compareTo(a.date));
     bank = s.bank;
     accountTail = s.accountTail;
     closingBalance = s.closingBalance;
@@ -46,6 +47,42 @@ class SpendingStore extends ChangeNotifier {
     bank = accountTail = sourceName = null;
     closingBalance = null;
     _month = null;
+    notifyListeners();
+  }
+
+  // ---- Categories & learning ---------------------------------------------
+
+  SmartCategorizer _cz = categorizer;
+
+  /// Use a different categoriser (tests).
+  set categoriserForTesting(SmartCategorizer c) => _cz = c;
+
+  Txn _categorise(Txn t) {
+    final g = _cz.classify(t.text, t.name, t.amount);
+    return t.withCategory(g.cat, g.sub, g.source, g.confidence);
+  }
+
+  /// Spending the app couldn't categorise.
+  int get needsReview => _txns.where((t) => t.amount < 0 && t.source == CatSource.none).length;
+
+  /// The user corrects [t] to [cat]. The model learns it, then every
+  /// transaction is re-categorised so similar ones update straight away.
+  /// Returns how many transactions changed category.
+  Future<int> teach(Txn t, Cat cat) async {
+    await _cz.learn(t.text, t.name, t.amount, cat);
+    final before = [for (final x in _txns) x.cat];
+    _txns = [for (final x in _txns) _categorise(x)]; // same order, so compare by position
+    var changed = 0;
+    for (var i = 0; i < _txns.length; i++) {
+      if (before[i] != _txns[i].cat) changed++;
+    }
+    notifyListeners();
+    return changed;
+  }
+
+  Future<void> resetLearning() async {
+    await _cz.reset();
+    _txns = [for (final x in _txns) _categorise(x)];
     notifyListeners();
   }
 

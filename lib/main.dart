@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+
+import 'data/smart_categorizer.dart';
 import 'screens/budget_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/app_theme.dart';
 
-void main() => runApp(const BbtApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await categorizer.init(); // load what the model learned last time
+  runApp(const BbtApp());
+}
 
 class BbtApp extends StatelessWidget {
   const BbtApp({super.key});
