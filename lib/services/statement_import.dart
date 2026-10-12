@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -9,18 +11,19 @@ import '../data/statement_parser.dart';
 /// Asks for the PDF password if the bank protected it.
 Future<void> importStatement(BuildContext context) async {
   final messenger = ScaffoldMessenger.of(context);
-  final picked = await FilePicker.platform.pickFiles(
+  final file = await FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: const ['pdf', 'csv'],
-    withData: true, // needed on web, convenient everywhere
   );
-  if (picked == null || picked.files.isEmpty) return;
-  final file = picked.files.single;
-  final bytes = file.bytes;
-  if (bytes == null) {
+  if (file == null) return; // user cancelled
+  final Uint8List bytes;
+  try {
+    bytes = await file.readAsBytes();
+  } catch (_) {
     messenger.showSnackBar(const SnackBar(content: Text("Couldn't read that file. Try again.")));
     return;
   }
+  if (!context.mounted) return;
 
   String? password;
   while (true) {
