@@ -29,7 +29,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
           const SizedBox(height: 16),
           if (!store.hasData)
-            EmptyState(onUpload: () => importStatement(context), onSample: loadSample)
+            EmptyState(onUpload: () => importStatement(context))
           else
             ..._content(),
         ]),

@@ -1,7 +1,4 @@
-import 'dart:convert';
 import 'dart:math' as math;
-
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'categorizer.dart';
 import 'models.dart';
@@ -15,6 +12,16 @@ class CategoryGuess {
   const CategoryGuess(this.cat, this.sub, this.source, this.confidence);
 }
 
+/// One correction the user made ("this text is Food"). Stored in the database
+/// (category_lessons) and replayed into the model at sign-in.
+class Lesson {
+  final String text;
+  final String merchantKey;
+  final Cat cat;
+  final double amount;
+  const Lesson(this.text, this.merchantKey, this.cat, this.amount);
+}
+
 /// Learns categories from the user's corrections.
 ///
 /// Three layers, strongest first:
@@ -24,16 +31,13 @@ class CategoryGuess {
 ///     seen ("MUGG BEAN AIRPORT", "CHOPIES MOGODITSHANE").
 ///  3. **Keyword rules** – the built-in list in categorizer.dart.
 ///
-/// Everything runs and is stored on the device.
+/// The model itself runs on the phone; the lessons it learns from are saved
+/// to the user's account, so it keeps learning across devices and reinstalls.
 class SmartCategorizer {
-  SmartCategorizer({this.persist = true}) {
+  SmartCategorizer() {
     _rebuild();
   }
 
-  /// Turn off in tests (no SharedPreferences there).
-  final bool persist;
-
-  static const _prefsKey = 'bbt.categorizer.v1';
   static const _maxExamples = 3000;
 
   /// Minimum model probability to use a guess (8 categories, so chance is ~0.13).
@@ -58,71 +62,32 @@ class SmartCategorizer {
   int get examplesLearned => _examples.length;
   int get merchantsLearned => _merchant.length;
 
-  // ---- Persistence --------------------------------------------------------
-
-  Future<void> init() async {
-    if (!persist) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsKey);
-      if (raw == null) return;
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      _examples
-        ..clear()
-        ..addAll([
-          for (final e in (j['examples'] as List))
-            if (_catByName(e[1] as String) case final c?) (e[0] as String, c, (e[2] as num).toDouble()),
-        ]);
-      _merchant
-        ..clear()
-        ..addAll({
-          for (final e in (j['merchants'] as Map<String, dynamic>).entries)
-            if (_catByName(e.value as String) case final c?) e.key: c,
-        });
-      _rebuild();
-    } catch (_) {
-      // Corrupt or unavailable storage: start fresh rather than crash.
-    }
-  }
-
-  Future<void> _save() async {
-    if (!persist) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _prefsKey,
-        jsonEncode({
-          'examples': [for (final (t, c, a) in _examples) [t, c.name, a]],
-          'merchants': {for (final e in _merchant.entries) e.key: e.value.name},
-        }),
-      );
-    } catch (_) {}
-  }
-
-  Future<void> reset() async {
+  /// Replace everything learned with [lessons] (oldest first), e.g. after sign-in.
+  void restore(Iterable<Lesson> lessons) {
     _examples.clear();
     _merchant.clear();
-    _rebuild();
-    await _save();
-  }
-
-  static Cat? _catByName(String n) {
-    for (final c in Cat.values) {
-      if (c.name == n) return c;
+    for (final l in lessons) {
+      _merchant[l.merchantKey] = l.cat;
+      _examples.add((l.text, l.cat, l.amount));
     }
-    return null;
+    while (_examples.length > _maxExamples) {
+      _examples.removeAt(0);
+    }
+    _rebuild();
   }
 
-  // ---- Learning -----------------------------------------------------------
+  void reset() => restore(const []);
 
-  /// The user says [text] (with [amount]) belongs to [cat].
-  Future<void> learn(String text, String name, double amount, Cat cat) async {
-    _merchant[merchantKey(name)] = cat;
+  /// The user says [text] (merchant [name], [amount]) belongs to [cat].
+  /// Returns the lesson so the caller can save it.
+  Lesson learn(String text, String name, double amount, Cat cat) {
+    final key = merchantKey(name);
+    _merchant[key] = cat;
     _examples.add((text, cat, amount));
     if (_examples.length > _maxExamples) _examples.removeAt(0);
     _train(text, amount, cat, weight: 3); // user examples count more than seeds
     _userWords.putIfAbsent(cat, () => {}).addAll(_words(text));
-    await _save();
+    return Lesson(text, key, cat, amount);
   }
 
   void _rebuild() {

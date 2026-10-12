@@ -62,16 +62,28 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(children: [
             const Text('bbt.', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.primary)),
             const Spacer(),
-            IconButton(onPressed: () {}, icon: const Icon(Icons.notifications_none)),
-            const CircleAvatar(radius: 16, backgroundColor: Color(0xFFDCEBF8), child: Text('JC', style: TextStyle(fontSize: 12))),
+            UserAvatar(name: store.userName, email: store.userEmail),
           ]),
           const SizedBox(height: 12),
-          const Text('Good morning, Jane.',
-              style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: AppColors.ink)),
+          Text(_greeting(store.userName),
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: AppColors.ink)),
           const Text("Let's make sense of your money.", style: TextStyle(color: AppColors.muted)),
           const SizedBox(height: 16),
-          if (!store.hasData)
-            EmptyState(onUpload: () => importStatement(context), onSample: loadSample)
+          if (store.loading && !store.hasData)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (store.loadError != null)
+            BCard(
+              child: Column(children: [
+                Text(store.loadError!, textAlign: TextAlign.center),
+                const SizedBox(height: 10),
+                FilledButton(onPressed: store.loadForUser, child: const Text('Try again')),
+              ]),
+            )
+          else if (!store.hasData)
+            EmptyState(onUpload: () => importStatement(context))
           else
             ..._content(context),
         ]),
@@ -94,12 +106,6 @@ class _HomeScreenState extends State<HomeScreen> {
           label: const Text('Upload statement'),
         ),
       ]),
-      if (store.isSample)
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text('Showing sample data — upload your own statement to replace it.',
-              style: TextStyle(fontSize: 12, color: AppColors.muted)),
-        ),
       if (store.isMultiMonth) ...[
         const SizedBox(height: 12),
         const MonthChips(),
@@ -214,36 +220,49 @@ class _AccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: store, builder: (context, _) => _build());
 
-  Widget _build() => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(
-            colors: [Color(0xFFE3F1FB), Color(0xFFCFE6F6)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+  Widget _build() {
+    final st = store.latestStatement;
+    final tail = st?.accountTail;
+    final balance = st?.closingBalance;
+    final end = st?.periodEnd;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(26),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE3F1FB), Color(0xFFCFE6F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(store.sourceName ?? 'Statement', style: const TextStyle(color: AppColors.muted), overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 4),
-          Text(store.bank ?? 'Your bank',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.ink)),
-          if (store.accountTail != null) ...[
-            const SizedBox(height: 14),
-            Text('••••  ••••  ••••  ${store.accountTail}', style: const TextStyle(letterSpacing: 2, color: AppColors.muted)),
-          ],
-          if (store.closingBalance != null) ...[
-            const SizedBox(height: 14),
-            const Text('Closing balance', style: TextStyle(color: AppColors.muted)),
-            FittedBox(
-              child: Text(pula(store.closingBalance!),
-                  style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            ),
-          ],
-        ]),
-      );
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          st == null ? 'Statements' : 'Latest statement · ${shortDate(st.uploadedAt)} ${st.uploadedAt.year}',
+          style: const TextStyle(color: AppColors.muted),
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Text(st?.bank ?? 'Bank account',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.ink)),
+        if (tail != null) ...[
+          const SizedBox(height: 14),
+          Text('••••  ••••  ••••  $tail', style: const TextStyle(letterSpacing: 2, color: AppColors.muted)),
+        ],
+        if (balance != null) ...[
+          const SizedBox(height: 14),
+          Text(
+            end == null ? 'Closing balance' : 'Balance on ${shortDate(end)} ${end.year}',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+          FittedBox(
+            child: Text(pula(balance),
+                style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.ink)),
+          ),
+        ],
+      ]),
+    );
+  }
 }
 
 class _MiniStat extends StatelessWidget {
@@ -263,4 +282,11 @@ class _MiniStat extends StatelessWidget {
           ),
         ]),
       );
+}
+
+String _greeting(String name) {
+  final h = DateTime.now().hour;
+  final part = h < 12 ? 'Good morning' : (h < 17 ? 'Good afternoon' : 'Good evening');
+  final first = name.trim().split(RegExp(r'\s+')).first;
+  return first.isEmpty ? '$part.' : '$part, $first.';
 }

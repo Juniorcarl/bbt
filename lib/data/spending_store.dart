@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../services/backend.dart';
 import 'models.dart';
 import 'smart_categorizer.dart';
 import 'statement_parser.dart';
@@ -14,39 +15,145 @@ class MonthSummary {
   double get net => income - spent;
 }
 
-/// Holds the uploaded statement and works out every number the screens show.
+/// The signed-in user's data, and every number the screens show.
 ///
-/// The screens look at a *period*: either one month, or all months in the
-/// statement ([allMonths]). Multi-month statements open on "All months".
+/// Data lives in Supabase ([Backend]); this class keeps a copy in memory and
+/// does the maths. The screens look at a *period*: one month, or all months
+/// ([allMonths]).
 class SpendingStore extends ChangeNotifier {
+  SpendingStore({Backend? backend}) : _db = backend;
+
+  /// Null in tests: everything still works, nothing is saved.
+  Backend? _db;
+  set backend(Backend? b) => _db = b;
+
   List<Txn> _txns = const [];
-  String? bank;
-  String? accountTail;
-  String? sourceName;
-  double? closingBalance;
-  bool isSample = false;
+  List<StatementRecord> statements = const [];
+  Map<Cat, double> budgets = const {};
+  String userName = '';
+  String userEmail = '';
   DateTime? _month; // null = all months
+
+  bool loading = false;
+  String? loadError;
 
   List<Txn> get txns => _txns;
   bool get hasData => _txns.isNotEmpty;
 
-  void load(ParsedStatement s, String name, {bool sample = false}) {
-    _txns = [for (final t in s.txns) _categorise(t)]..sort((a, b) => b.date.compareTo(a.date));
-    bank = s.bank;
-    accountTail = s.accountTail;
-    closingBalance = s.closingBalance;
-    sourceName = name;
-    isSample = sample;
+  /// Latest uploaded statement (for the account card).
+  StatementRecord? get latestStatement => statements.isEmpty ? null : statements.first;
+
+  // ---- Loading ------------------------------------------------------------
+
+  /// Loads everything for the signed-in user.
+  Future<void> loadForUser() async {
+    final db = _db;
+    if (db == null) return;
+    loading = true;
+    loadError = null;
+    notifyListeners();
+    try {
+      final results = await Future.wait([
+        db.fetchLessons(),
+        db.fetchTransactions(),
+        db.fetchStatements(),
+        db.fetchBudgets(),
+        db.fetchName(),
+      ]);
+      _cz.restore(results[0] as List<Lesson>);
+      _setTxns((results[1] as List<Txn>).map(_categorise));
+      statements = results[2] as List<StatementRecord>;
+      budgets = results[3] as Map<Cat, double>;
+      userName = results[4] as String;
+      userEmail = db.user?.email ?? '';
+      _month = null;
+    } catch (e) {
+      loadError = "Couldn't load your data. Check your internet connection and try again.";
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Forget everything in memory (sign-out).
+  void clear() {
+    _txns = const [];
+    statements = const [];
+    budgets = const {};
+    userName = userEmail = '';
+    _month = null;
+    loadError = null;
+    _cz.reset();
+    notifyListeners();
+  }
+
+  void _setTxns(Iterable<Txn> list) {
+    _txns = list.toList()..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  /// Puts a parsed statement in memory without saving it (used by tests).
+  void load(ParsedStatement s, String name) {
+    _setTxns(s.txns.map(_categorise));
     final ms = months;
     _month = ms.length == 1 ? ms.first : null;
     notifyListeners();
   }
 
-  void clear() {
-    _txns = const [];
-    bank = accountTail = sourceName = null;
-    closingBalance = null;
+  /// Categorises, saves and reloads. Returns how many were new.
+  Future<SaveResult> importStatement(ParsedStatement s, String fileName) async {
+    final categorised = [for (final t in s.txns) _categorise(t)];
+    final db = _db;
+    if (db == null) {
+      load(s, fileName);
+      return SaveResult(categorised.length, 0);
+    }
+    final result = await db.saveStatement(s, categorised, fileName);
+    final fresh = await Future.wait([db.fetchTransactions(), db.fetchStatements()]);
+    _setTxns((fresh[0] as List<Txn>).map(_categorise));
+    statements = fresh[1] as List<StatementRecord>;
     _month = null;
+    notifyListeners();
+    return result;
+  }
+
+  Future<void> deleteStatement(StatementRecord st) async {
+    final db = _db;
+    if (db == null) return;
+    await db.deleteStatement(st.id);
+    final fresh = await Future.wait([db.fetchTransactions(), db.fetchStatements()]);
+    _setTxns((fresh[0] as List<Txn>).map(_categorise));
+    statements = fresh[1] as List<StatementRecord>;
+    _month = null;
+    notifyListeners();
+  }
+
+  Future<void> deleteAllData() async {
+    await _db?.deleteAllData();
+    _txns = const [];
+    statements = const [];
+    budgets = const {};
+    _month = null;
+    _cz.reset();
+    notifyListeners();
+  }
+
+  Future<void> updateName(String name) async {
+    await _db?.updateName(name);
+    userName = name;
+    notifyListeners();
+  }
+
+  // ---- Budgets --------------------------------------------------------------
+
+  Future<void> setBudget(Cat cat, double? limit) async {
+    await _db?.setBudget(cat, limit);
+    final b = Map<Cat, double>.of(budgets);
+    if (limit == null || limit <= 0) {
+      b.remove(cat);
+    } else {
+      b[cat] = limit;
+    }
+    budgets = b;
     notifyListeners();
   }
 
@@ -56,6 +163,8 @@ class SpendingStore extends ChangeNotifier {
 
   /// Use a different categoriser (tests).
   set categoriserForTesting(SmartCategorizer c) => _cz = c;
+
+  SmartCategorizer get categoriser => _cz;
 
   Txn _categorise(Txn t) {
     final g = _cz.classify(t.text, t.name, t.amount);
@@ -69,21 +178,39 @@ class SpendingStore extends ChangeNotifier {
   /// transaction is re-categorised so similar ones update straight away.
   /// Returns how many transactions changed category.
   Future<int> teach(Txn t, Cat cat) async {
-    await _cz.learn(t.text, t.name, t.amount, cat);
-    final before = [for (final x in _txns) x.cat];
+    final lesson = _cz.learn(t.text, t.name, t.amount, cat);
+    final before = _txns;
     _txns = [for (final x in _txns) _categorise(x)]; // same order, so compare by position
-    var changed = 0;
-    for (var i = 0; i < _txns.length; i++) {
-      if (before[i] != _txns[i].cat) changed++;
-    }
+    final changed = <Txn>[
+      for (var i = 0; i < _txns.length; i++)
+        if (before[i].cat != _txns[i].cat || before[i].source != _txns[i].source) _txns[i],
+    ];
     notifyListeners();
-    return changed;
+    final db = _db;
+    if (db != null) {
+      await db.saveLesson(lesson);
+      await db.updateCategories(changed);
+    }
+    var moved = 0;
+    for (var i = 0; i < _txns.length; i++) {
+      if (before[i].cat != _txns[i].cat) moved++;
+    }
+    return moved;
   }
 
   Future<void> resetLearning() async {
-    await _cz.reset();
+    _cz.reset();
+    final before = _txns;
     _txns = [for (final x in _txns) _categorise(x)];
     notifyListeners();
+    final db = _db;
+    if (db != null) {
+      await db.clearLessons();
+      await db.updateCategories([
+        for (var i = 0; i < _txns.length; i++)
+          if (before[i].cat != _txns[i].cat || before[i].source != _txns[i].source) _txns[i],
+      ]);
+    }
   }
 
   // ---- Period selection --------------------------------------------------
@@ -167,6 +294,13 @@ class SpendingStore extends ChangeNotifier {
 
   double get avgMonthlySpent => monthSpent / periodMonths;
   double get avgMonthlyIncome => monthIncome / periodMonths;
+
+  /// Average monthly spending on [cat] across every month with data.
+  double avgSpendFor(Cat cat) {
+    if (monthCount == 0) return 0;
+    final total = _txns.where((t) => t.cat == cat && t.amount < 0).fold(0.0, (a, t) => a - t.amount);
+    return total / monthCount;
+  }
 
   /// Month-by-month totals, oldest first.
   List<MonthSummary> get monthSummaries => [for (final m in months.reversed) _summary(m)];

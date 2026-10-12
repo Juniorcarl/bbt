@@ -37,6 +37,13 @@ extension CatX on Cat {
       }[this]!;
 }
 
+Cat? catFromName(String n) {
+  for (final c in Cat.values) {
+    if (c.name == n) return c;
+  }
+  return null;
+}
+
 /// Where a transaction's category came from.
 enum CatSource {
   rule, // built-in keyword list
@@ -46,6 +53,7 @@ enum CatSource {
 }
 
 class Txn {
+  final String? id; // database id, null until saved
   final String name;
   final Cat cat;
   final String sub; // e.g. Groceries
@@ -55,14 +63,14 @@ class Txn {
   final CatSource source;
   final double confidence; // 0..1, for model guesses
   const Txn(this.name, this.cat, this.sub, this.date, this.amount,
-      {this.raw = '', this.source = CatSource.rule, this.confidence = 1});
+      {this.id, this.raw = '', this.source = CatSource.rule, this.confidence = 1});
   bool get isIncome => amount > 0;
 
   /// Text the categoriser looks at.
   String get text => raw.isEmpty ? name : raw;
 
   Txn withCategory(Cat cat, String sub, CatSource source, [double confidence = 1]) =>
-      Txn(name, cat, sub, date, amount, raw: raw, source: source, confidence: confidence);
+      Txn(name, cat, sub, date, amount, id: id, raw: raw, source: source, confidence: confidence);
 }
 
 /// Botswana pula: -P 87.50, +P 12,000.00

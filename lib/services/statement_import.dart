@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../data/mock_data.dart';
+import '../data/models.dart';
 import '../data/spending_store.dart';
 import '../data/statement_parser.dart';
 
@@ -26,15 +26,11 @@ Future<void> importStatement(BuildContext context) async {
   if (!context.mounted) return;
 
   String? password;
+  ParsedStatement parsed;
   while (true) {
     try {
-      final parsed = parseStatement(bytes, file.name, password: password);
-      store.load(parsed, file.name);
-      messenger.showSnackBar(SnackBar(
-        content: Text('Read ${store.loadSummary}'),
-        duration: const Duration(seconds: 6),
-      ));
-      return;
+      parsed = parseStatement(bytes, file.name, password: password);
+      break;
     } on StatementPasswordRequired catch (e) {
       if (!context.mounted) return;
       password = await _askPassword(context, wrong: e.wrongPassword);
@@ -44,9 +40,49 @@ Future<void> importStatement(BuildContext context) async {
       return;
     }
   }
+  if (!context.mounted) return;
+
+  // Saving can take a few seconds on mobile data.
+  final navigator = Navigator.of(context, rootNavigator: true);
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(children: [
+          SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
+          SizedBox(width: 16),
+          Expanded(child: Text('Saving your transactions…')),
+        ]),
+      ),
+    ),
+  );
+  try {
+    final result = await store.importStatement(parsed, file.name);
+    navigator.pop();
+    messenger.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 7),
+      content: Text('${_describe(parsed)}\n'
+          '${result.added} new transaction${result.added == 1 ? '' : 's'} saved'
+          '${result.alreadySaved > 0 ? ' · ${result.alreadySaved} were already saved' : ''}.'),
+    ));
+  } catch (e) {
+    navigator.pop();
+    messenger.showSnackBar(const SnackBar(
+      content: Text("Couldn't save the statement. Check your internet connection and try again."),
+    ));
+  }
 }
 
-void loadSample() => store.load(sampleStatement(), 'Sample statement', sample: true);
+/// "142 transactions read · 1 Aug 2026 – 31 Oct 2026 (3 months)"
+String _describe(ParsedStatement s) {
+  final dates = s.txns.map((t) => t.date).toList()..sort();
+  if (dates.isEmpty) return 'No transactions found';
+  final months = {for (final d in dates) '${d.year}-${d.month}'}.length;
+  return '${s.txns.length} transactions read · ${shortDate(dates.first)} ${dates.first.year} – '
+      '${shortDate(dates.last)} ${dates.last.year} ($months month${months == 1 ? '' : 's'})';
+}
 
 Future<String?> _askPassword(BuildContext context, {required bool wrong}) async {
   final controller = TextEditingController();

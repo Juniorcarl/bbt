@@ -37,8 +37,7 @@ dependencies:
   # Stage 1: statement upload + reading
   file_picker: '>=12.0.0 <14.0.0' # v12+ API: FilePicker.pickFile() + readAsBytes()
   syncfusion_flutter_pdf: '>=27.0.0 <40.0.0'
-  # Saves what the categoriser has learned on the device
-  shared_preferences: ^2.5.0
+  supabase_flutter: ^2.18.0 # sign-up/login + database
 
 dev_dependencies:
   flutter_test:

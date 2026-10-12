@@ -203,8 +203,7 @@ class SectionTitle extends StatelessWidget {
 /// Shown on every tab until a statement has been uploaded.
 class EmptyState extends StatelessWidget {
   final VoidCallback onUpload;
-  final VoidCallback onSample;
-  const EmptyState({super.key, required this.onUpload, required this.onSample});
+  const EmptyState({super.key, required this.onUpload});
 
   @override
   Widget build(BuildContext context) => BCard(
@@ -232,9 +231,13 @@ class EmptyState extends StatelessWidget {
             icon: const Icon(Icons.upload_outlined, size: 18),
             label: const Text('Upload statement'),
           ),
-          TextButton(onPressed: onSample, child: const Text('Try with sample data')),
-          const Text('Your statement is read on this device and never uploaded to a server.',
-              textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          const Text(
+            'The file is read on your phone and never uploaded. Only the transactions are saved, '
+            'to your private account.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: AppColors.muted),
+          ),
         ]),
       );
 }
@@ -321,6 +324,27 @@ class MonthBreakdown extends StatelessWidget {
             ),
           ),
       ]),
+    );
+  }
+}
+
+/// Circle with the user's initials.
+class UserAvatar extends StatelessWidget {
+  final String name;
+  final String email;
+  final double radius;
+  const UserAvatar({super.key, required this.name, required this.email, this.radius = 16});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final initials = parts.isEmpty
+        ? (email.isEmpty ? '?' : email[0].toUpperCase())
+        : parts.take(2).map((p) => p[0].toUpperCase()).join();
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: const Color(0xFFDCEBF8),
+      child: Text(initials, style: TextStyle(fontSize: radius * 0.75, color: AppColors.ink)),
     );
   }
 }

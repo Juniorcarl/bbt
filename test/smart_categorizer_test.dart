@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late SmartCategorizer cz;
-  setUp(() => cz = SmartCategorizer(persist: false));
+  setUp(() => cz = SmartCategorizer());
 
   test('keyword rules still work out of the box', () {
     expect(cz.classify('POS PURCHASE CHOPPIES', 'Choppies', -100).cat, Cat.food);
@@ -25,14 +25,14 @@ void main() {
   });
 
   test('remembers a merchant the user taught', () async {
-    await cz.learn('KGALAGADI BREWERIES 1234', 'Kgalagadi Breweries', -150, Cat.entertainment);
+    cz.learn('KGALAGADI BREWERIES 1234', 'Kgalagadi Breweries', -150, Cat.entertainment);
     final g = cz.classify('KGALAGADI BREWERIES 9999', 'Kgalagadi Breweries', -80);
     expect(g.cat, Cat.entertainment);
     expect(g.source, CatSource.user);
   });
 
   test('generalises from what the user taught to new variants', () async {
-    await cz.learn('MOTHERS TOUCH CATERING', 'Mothers Touch Catering', -150, Cat.food);
+    cz.learn('MOTHERS TOUCH CATERING', 'Mothers Touch Catering', -150, Cat.food);
     final g = cz.classify('MOTHERS TOUCH CATERERS PALAPYE', 'Mothers Touch Caterers Palapye', -90);
     expect(g.cat, Cat.food);
     expect(g.source, CatSource.model);
@@ -40,13 +40,13 @@ void main() {
 
   test('user teaching beats a keyword rule for that merchant', () async {
     // "Game" is a shopping keyword, but this person's "Game Lodge" is entertainment.
-    await cz.learn('GAME LODGE MAUN', 'Game Lodge Maun', -900, Cat.entertainment);
+    cz.learn('GAME LODGE MAUN', 'Game Lodge Maun', -900, Cat.entertainment);
     expect(cz.classify('GAME LODGE MAUN', 'Game Lodge Maun', -400).cat, Cat.entertainment);
   });
 
   test('reset forgets everything', () async {
-    await cz.learn('SEDIBENG', 'Sedibeng', -50, Cat.food);
-    await cz.reset();
+    cz.learn('SEDIBENG', 'Sedibeng', -50, Cat.food);
+    cz.reset();
     expect(cz.examplesLearned, 0);
     expect(cz.classify('SEDIBENG', 'Sedibeng', -50).source, CatSource.none);
   });
