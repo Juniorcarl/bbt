@@ -65,7 +65,8 @@ Future<void> importStatement(BuildContext context) async {
       duration: const Duration(seconds: 7),
       content: Text('${_describe(parsed)}\n'
           '${result.added} new transaction${result.added == 1 ? '' : 's'} saved'
-          '${result.alreadySaved > 0 ? ' · ${result.alreadySaved} were already saved' : ''}.'),
+          '${result.alreadySaved > 0 ? ' · ${result.alreadySaved} were already saved' : ''}.\n'
+          '${_booksLine(parsed)}'),
     ));
   } catch (e) {
     navigator.pop();
@@ -73,6 +74,13 @@ Future<void> importStatement(BuildContext context) async {
       content: Text("Couldn't save the statement. Check your internet connection and try again."),
     ));
   }
+}
+
+String _booksLine(ParsedStatement s) {
+  final d = s.difference;
+  if (d == null) return 'No opening/closing balance found to check against.';
+  if (d.abs() < 0.01 && s.flaggedCount == 0) return '✓ The books balance with your statement.';
+  return "⚠ ${pula(d.abs())} doesn't add up. Check Profile → Statements.";
 }
 
 /// "142 transactions read · 1 Aug 2026 – 31 Oct 2026 (3 months)"

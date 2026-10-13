@@ -1,8 +1,36 @@
 import 'package:flutter/material.dart';
 
-enum Cat { food, transport, shopping, bills, entertainment, health, income, other }
+/// Every transaction belongs to exactly one category. The category decides its
+/// [TxnType]: income, a kind of spending, bank charges, or a transfer between
+/// the user's own accounts (which is left out of income and spending).
+enum Cat {
+  food,
+  transport,
+  shopping,
+  bills,
+  entertainment,
+  health,
+  cash,
+  people,
+  other,
+  charges,
+  income,
+  transfer,
+}
+
+enum TxnType { income, spending, charge, transfer }
 
 extension CatX on Cat {
+  TxnType get type => switch (this) {
+        Cat.income => TxnType.income,
+        Cat.charges => TxnType.charge,
+        Cat.transfer => TxnType.transfer,
+        _ => TxnType.spending,
+      };
+
+  /// Categories a budget limit can be set on.
+  bool get isOutflow => type == TxnType.spending || type == TxnType.charge;
+
   String get label => const {
         Cat.food: 'Food',
         Cat.transport: 'Transport',
@@ -10,8 +38,12 @@ extension CatX on Cat {
         Cat.bills: 'Bills',
         Cat.entertainment: 'Entertainment',
         Cat.health: 'Health',
-        Cat.income: 'Income',
+        Cat.cash: 'Cash',
+        Cat.people: 'Sent to people',
         Cat.other: 'Other',
+        Cat.charges: 'Bank charges',
+        Cat.income: 'Income',
+        Cat.transfer: 'Transfer',
       }[this]!;
 
   IconData get icon => const {
@@ -21,8 +53,12 @@ extension CatX on Cat {
         Cat.bills: Icons.receipt_long_outlined,
         Cat.entertainment: Icons.music_note_outlined,
         Cat.health: Icons.favorite_border,
-        Cat.income: Icons.south_west,
+        Cat.cash: Icons.local_atm_outlined,
+        Cat.people: Icons.people_outline,
         Cat.other: Icons.more_horiz,
+        Cat.charges: Icons.account_balance_outlined,
+        Cat.income: Icons.south_west,
+        Cat.transfer: Icons.swap_horiz,
       }[this]!;
 
   Color get color => const {
@@ -32,8 +68,12 @@ extension CatX on Cat {
         Cat.bills: Color(0xFF8CC7F0),
         Cat.entertainment: Color(0xFFF2A0C0),
         Cat.health: Color(0xFFF2D56E),
-        Cat.income: Color(0xFF2E9E6B),
+        Cat.cash: Color(0xFF9ED0C8),
+        Cat.people: Color(0xFFC9B3E6),
         Cat.other: Color(0xFFB8C2D0),
+        Cat.charges: Color(0xFFE8857A),
+        Cat.income: Color(0xFF2E9E6B),
+        Cat.transfer: Color(0xFF9AA8B8),
       }[this]!;
 }
 
@@ -54,6 +94,9 @@ enum CatSource {
 
 class Txn {
   final String? id; // database id, null until saved
+  final double fee; // per-transaction fee printed on the statement (charged later as a lump)
+  final double? balance; // running balance after this transaction, if printed
+  final bool flagged; // amount didn't match the change in balance
   final String name;
   final Cat cat;
   final String sub; // e.g. Groceries
@@ -63,14 +106,22 @@ class Txn {
   final CatSource source;
   final double confidence; // 0..1, for model guesses
   const Txn(this.name, this.cat, this.sub, this.date, this.amount,
-      {this.id, this.raw = '', this.source = CatSource.rule, this.confidence = 1});
+      {this.id,
+      this.raw = '',
+      this.source = CatSource.rule,
+      this.confidence = 1,
+      this.fee = 0,
+      this.balance,
+      this.flagged = false});
   bool get isIncome => amount > 0;
+  TxnType get type => cat.type;
 
   /// Text the categoriser looks at.
   String get text => raw.isEmpty ? name : raw;
 
   Txn withCategory(Cat cat, String sub, CatSource source, [double confidence = 1]) =>
-      Txn(name, cat, sub, date, amount, id: id, raw: raw, source: source, confidence: confidence);
+      Txn(name, cat, sub, date, amount,
+          id: id, raw: raw, source: source, confidence: confidence, fee: fee, balance: balance, flagged: flagged);
 }
 
 /// Botswana pula: -P 87.50, +P 12,000.00

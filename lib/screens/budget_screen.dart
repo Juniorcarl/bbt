@@ -10,7 +10,8 @@ import '../widgets/common.dart';
 class BudgetScreen extends StatelessWidget {
   const BudgetScreen({super.key});
 
-  static final _expenseCats = Cat.values.where((c) => c != Cat.income).toList();
+  /// Spending categories plus bank charges (income and transfers can't have limits).
+  static final _expenseCats = Cat.values.where((c) => c.isOutflow).toList();
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: store, builder: (context, _) => _build(context));
@@ -20,7 +21,10 @@ class BudgetScreen extends StatelessWidget {
     final planned = budgets.values.fold(0.0, (a, b) => a + b);
     // Limits are monthly, so "All months" compares against the monthly average.
     final perMonth = store.periodMonths;
-    final income = store.monthIncome / perMonth;
+    // Compare limits with *regular* income (salary, allowance…), not one-offs.
+    final regular = store.monthRegularIncome / perMonth;
+    final usingRegular = regular > 0;
+    final income = usingRegular ? regular : store.monthIncome / perMonth;
     final spend = {for (final e in store.categorySpend.entries) e.key: e.value / perMonth};
     final averaged = store.allMonths && store.isMultiMonth;
 
@@ -58,7 +62,7 @@ class BudgetScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 18),
               Row(children: [
-                _Stat(averaged ? 'Avg. money in' : 'Money in', income),
+                _Stat(usingRegular ? 'Regular income' : (averaged ? 'Avg. money in' : 'Money in'), income),
                 _Stat('Total limits', planned),
                 _Stat('Left to save', income - planned),
               ]),
@@ -97,7 +101,7 @@ class BudgetScreen extends StatelessWidget {
   /// Points at the category closest to (or over) its limit.
   String _insight(Map<Cat, double> budgets, Map<Cat, double> spend) {
     if (budgets.isEmpty) {
-      final top = spend.entries.where((e) => e.key != Cat.income).toList()
+      final top = spend.entries.where((e) => e.key.isOutflow).toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       if (top.isEmpty) return 'Set monthly limits below to track your spending.';
       return 'No limits yet. ${top.first.key.label} is where most of your money goes '

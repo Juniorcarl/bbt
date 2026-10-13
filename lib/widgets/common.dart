@@ -71,7 +71,12 @@ class TxnTile extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(
               pula(t.amount, sign: true),
-              style: TextStyle(fontWeight: FontWeight.w700, color: t.isIncome ? AppColors.income : AppColors.expense),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: t.type == TxnType.transfer
+                    ? AppColors.muted
+                    : (t.isIncome ? AppColors.income : AppColors.expense),
+              ),
             ),
             Text(shortDate(t.date), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
           ]),
@@ -101,6 +106,24 @@ Future<void> showCategorySheet(BuildContext context, Txn t) async {
               padding: const EdgeInsets.only(top: 6),
               child: Text('On statement: ${t.raw}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
             ),
+          if (t.fee > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Bank fee for this: ${pula(t.fee)}',
+                  style: TextStyle(fontSize: 12, color: Cat.charges.color, fontWeight: FontWeight.w600)),
+            ),
+          if (t.type == TxnType.income)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(store.isRegularIncome(t) ? 'Regular income (paid in more than one month)' : 'One-off income',
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ),
+          if (t.flagged)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text("⚠ This amount didn't match the change in your balance. Check it against your statement.",
+                  style: TextStyle(fontSize: 12, color: Color(0xFFD0573F))),
+            ),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -112,7 +135,12 @@ Future<void> showCategorySheet(BuildContext context, Txn t) async {
                 child: Text(switch (t.source) {
                   CatSource.user => 'You taught bbt this one.',
                   CatSource.model => 'bbt guessed this from what you\'ve taught it (${(t.confidence * 100).round()}% sure).',
-                  CatSource.rule => 'Matched a known merchant keyword.',
+                  CatSource.rule => switch (t.cat) {
+                      Cat.transfer => 'Money moved between your own accounts. Not counted as income or spending.',
+                      Cat.charges => 'A bank fee or charge.',
+                      Cat.income => 'Money that came in.',
+                      _ => 'Matched a known merchant keyword.',
+                    },
                   CatSource.none => "bbt doesn't recognise this yet.",
                 }, style: const TextStyle(fontSize: 12, color: AppColors.ink)),
               ),

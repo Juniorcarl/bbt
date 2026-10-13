@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../services/backend.dart';
+import 'categorizer.dart';
 import 'models.dart';
 import 'smart_categorizer.dart';
 import 'statement_parser.dart';
@@ -13,6 +14,55 @@ class MonthSummary {
   final int count;
   const MonthSummary(this.month, this.spent, this.income, this.count);
   double get net => income - spent;
+}
+
+/// Numbers for the money-flow diagram.
+class FlowData {
+  final double income;
+  final double fromBalance; // spent more than came in → came from savings/balance
+  final Map<Cat, double> outflows;
+  final double leftOver;
+  final double transfersOut;
+  final double transfersIn;
+  const FlowData({
+    required this.income,
+    required this.fromBalance,
+    required this.outflows,
+    required this.leftOver,
+    required this.transfersOut,
+    required this.transfersIn,
+  });
+}
+
+/// Does opening + everything on the statement = closing?
+class BooksCheck {
+  final double? opening;
+  final double? closing;
+  final double income; // +
+  final double spending; // −
+  final double charges; // −
+  final double transfers; // ±
+  final List<Txn> flagged;
+  const BooksCheck({
+    this.opening,
+    this.closing,
+    required this.income,
+    required this.spending,
+    required this.charges,
+    required this.transfers,
+    required this.flagged,
+  });
+
+  double? get expectedClosing => opening == null ? null : opening! + income + spending + charges + transfers;
+
+  /// Statement closing − our sum. 0 = balanced. Null when the statement has no balances.
+  double? get difference {
+    final e = expectedClosing;
+    if (e == null || closing == null) return null;
+    return ((closing! - e) * 100).roundToDouble() / 100;
+  }
+
+  bool get balanced => difference != null && difference!.abs() < 0.01;
 }
 
 /// The signed-in user's data, and every number the screens show.
@@ -58,13 +108,17 @@ class SpendingStore extends ChangeNotifier {
         db.fetchTransactions(),
         db.fetchStatements(),
         db.fetchBudgets(),
-        db.fetchName(),
+        db.fetchProfile(),
       ]);
       _cz.restore(results[0] as List<Lesson>);
-      _setTxns((results[1] as List<Txn>).map(_categorise));
+      final profile = results[4] as Profile;
+      userName = profile.name;
+      phone = profile.phone;
+      confirmedOwn = profile.ownAccounts;
+      rejectedOwn = profile.notOwnAccounts;
+      _setTxns(_contextual(results[1] as List<Txn>));
       statements = results[2] as List<StatementRecord>;
       budgets = results[3] as Map<Cat, double>;
-      userName = results[4] as String;
       userEmail = db.user?.email ?? '';
       _month = null;
     } catch (e) {
@@ -80,7 +134,11 @@ class SpendingStore extends ChangeNotifier {
     _txns = const [];
     statements = const [];
     budgets = const {};
-    userName = userEmail = '';
+    userName = userEmail = phone = '';
+    confirmedOwn = {};
+    rejectedOwn = {};
+    _detectedOwn = {};
+    _regularPayers = {};
     _month = null;
     loadError = null;
     _cz.reset();
@@ -93,7 +151,7 @@ class SpendingStore extends ChangeNotifier {
 
   /// Puts a parsed statement in memory without saving it (used by tests).
   void load(ParsedStatement s, String name) {
-    _setTxns(s.txns.map(_categorise));
+    _setTxns(_contextual(s.txns));
     final ms = months;
     _month = ms.length == 1 ? ms.first : null;
     notifyListeners();
@@ -101,7 +159,10 @@ class SpendingStore extends ChangeNotifier {
 
   /// Categorises, saves and reloads. Returns how many were new.
   Future<SaveResult> importStatement(ParsedStatement s, String fileName) async {
-    final categorised = [for (final t in s.txns) _categorise(t)];
+    // Categorise with everything we know, including the new statement
+    // (it may reveal own accounts through transfers going both ways).
+    final all = _contextual([..._txns, ...s.txns]);
+    final categorised = all.sublist(_txns.length);
     final db = _db;
     if (db == null) {
       load(s, fileName);
@@ -109,7 +170,7 @@ class SpendingStore extends ChangeNotifier {
     }
     final result = await db.saveStatement(s, categorised, fileName);
     final fresh = await Future.wait([db.fetchTransactions(), db.fetchStatements()]);
-    _setTxns((fresh[0] as List<Txn>).map(_categorise));
+    _setTxns(_contextual(fresh[0] as List<Txn>));
     statements = fresh[1] as List<StatementRecord>;
     _month = null;
     notifyListeners();
@@ -121,8 +182,17 @@ class SpendingStore extends ChangeNotifier {
     if (db == null) return;
     await db.deleteStatement(st.id);
     final fresh = await Future.wait([db.fetchTransactions(), db.fetchStatements()]);
-    _setTxns((fresh[0] as List<Txn>).map(_categorise));
+    _setTxns(_contextual(fresh[0] as List<Txn>));
     statements = fresh[1] as List<StatementRecord>;
+    _month = null;
+    notifyListeners();
+  }
+
+  /// Removes every statement and transaction so they can be uploaded again.
+  Future<void> clearStatements() async {
+    await _db?.deleteAllStatements();
+    _txns = const [];
+    statements = const [];
     _month = null;
     notifyListeners();
   }
@@ -141,6 +211,103 @@ class SpendingStore extends ChangeNotifier {
     await _db?.updateName(name);
     userName = name;
     notifyListeners();
+  }
+
+  // ---- Own accounts, phone number, regular income ------------------------
+
+  /// Counterparties the user confirmed are their own accounts / said are not.
+  Set<String> confirmedOwn = {};
+  Set<String> rejectedOwn = {};
+
+  /// The user's phone number as they entered it ('' = not set).
+  String phone = '';
+
+  Set<String> _detectedOwn = {};
+  Set<String> _regularPayers = {};
+
+  /// Own accounts in use: confirmed plus detected (minus rejected).
+  Set<String> get ownAccounts => {...confirmedOwn, ..._detectedOwn};
+
+  /// Detected but not yet confirmed — the app asks about these.
+  List<String> get pendingOwnAccounts => (_detectedOwn.difference(confirmedOwn)).toList()..sort();
+
+  /// Number used to recognise "cash for yourself": the one the user set, else
+  /// the number they most often buy airtime for.
+  String get effectivePhone => phone.isNotEmpty ? normalisePhone(phone) : (suggestedPhone ?? '');
+  String? suggestedPhone;
+
+  /// Transfer counterparties that look like the user's own accounts:
+  /// money goes both to and from them, or they're a short code rather than
+  /// a person's name ("Transfer To Gg" vs "Transfer To John Smith").
+  static Set<String> detectOwnAccounts(Iterable<Txn> txns) {
+    final to = <String>{}, from = <String>{}, codes = <String>{};
+    for (final t in txns) {
+      final cp = counterparty(t.text);
+      if (cp == null || cp.$1 != 'transfer') continue;
+      (cp.$2 == 'to' ? to : from).add(cp.$3);
+      if (!cp.$3.contains(' ') && cp.$3.length <= 5) codes.add(cp.$3);
+    }
+    return {...to.intersection(from), ...codes};
+  }
+
+  static String? _airtimePhone(Iterable<Txn> txns) {
+    final counts = <String, int>{};
+    for (final t in txns) {
+      if (!t.text.toLowerCase().contains('airtime')) continue;
+      for (final n in phoneNumbers(t.text)) {
+        counts[n] = (counts[n] ?? 0) + 1;
+      }
+    }
+    if (counts.isEmpty) return null;
+    return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+  }
+
+  String _payerKey(Txn t) => counterparty(t.text)?.$3 ?? SmartCategorizer.merchantKey(t.name);
+
+  /// Income from someone who paid in two or more different months.
+  bool isRegularIncome(Txn t) => t.type == TxnType.income && _regularPayers.contains(_payerKey(t));
+
+  /// Re-reads context from [list] (own accounts, phone, regular payers) and
+  /// categorises every transaction with it.
+  List<Txn> _contextual(Iterable<Txn> list) {
+    final l = list.toList();
+    _detectedOwn = detectOwnAccounts(l).difference(rejectedOwn);
+    suggestedPhone = _airtimePhone(l);
+    _cz.ownAccounts = ownAccounts;
+    _cz.ownPhone = effectivePhone;
+    final out = [for (final t in l) _categorise(t)];
+    final months = <String, Set<String>>{};
+    for (final t in out) {
+      if (t.type != TxnType.income) continue;
+      months.putIfAbsent(_payerKey(t), () => {}).add('${t.date.year}-${t.date.month}');
+    }
+    _regularPayers = {for (final e in months.entries) if (e.value.length >= 2) e.key};
+    return out;
+  }
+
+  Future<void> _recategoriseAndSave() async {
+    final before = _txns;
+    _setTxns(_contextual(_txns));
+    notifyListeners();
+    final byId = {for (final t in before) if (t.id != null) t.id!: t};
+    await _db?.updateCategories([
+      for (final t in _txns)
+        if (t.id != null && (byId[t.id]?.cat != t.cat || byId[t.id]?.source != t.source)) t,
+    ]);
+  }
+
+  Future<void> confirmOwnAccount(String key, bool isOwn) async {
+    confirmedOwn = {...confirmedOwn}..remove(key);
+    rejectedOwn = {...rejectedOwn}..remove(key);
+    (isOwn ? confirmedOwn : rejectedOwn).add(key);
+    await _db?.updateOwnAccounts(confirmedOwn, rejectedOwn);
+    await _recategoriseAndSave();
+  }
+
+  Future<void> setPhone(String value) async {
+    phone = value.trim();
+    await _db?.updatePhone(phone);
+    await _recategoriseAndSave();
   }
 
   // ---- Budgets --------------------------------------------------------------
@@ -180,7 +347,7 @@ class SpendingStore extends ChangeNotifier {
   Future<int> teach(Txn t, Cat cat) async {
     final lesson = _cz.learn(t.text, t.name, t.amount, cat);
     final before = _txns;
-    _txns = [for (final x in _txns) _categorise(x)]; // same order, so compare by position
+    _txns = _contextual(_txns); // same order, so compare by position
     final changed = <Txn>[
       for (var i = 0; i < _txns.length; i++)
         if (before[i].cat != _txns[i].cat || before[i].source != _txns[i].source) _txns[i],
@@ -201,7 +368,7 @@ class SpendingStore extends ChangeNotifier {
   Future<void> resetLearning() async {
     _cz.reset();
     final before = _txns;
-    _txns = [for (final x in _txns) _categorise(x)];
+    _txns = _contextual(_txns);
     notifyListeners();
     final db = _db;
     if (db != null) {
@@ -278,28 +445,42 @@ class SpendingStore extends ChangeNotifier {
   }
 
   // ---- Totals ------------------------------------------------------------
+  // Money out = spending + bank charges. Transfers between the user's own
+  // accounts are never counted as income or spending.
 
-  double _spent(Iterable<Txn> l) => l.where((t) => t.amount < 0).fold(0.0, (a, t) => a - t.amount);
-  double _income(Iterable<Txn> l) => l.where((t) => t.amount > 0).fold(0.0, (a, t) => a + t.amount);
+  double _spent(Iterable<Txn> l) => l.where((t) => t.cat.isOutflow).fold(0.0, (a, t) => a - t.amount);
+  double _income(Iterable<Txn> l) => l.where((t) => t.type == TxnType.income).fold(0.0, (a, t) => a + t.amount);
+  double _charges(Iterable<Txn> l) => l.where((t) => t.type == TxnType.charge).fold(0.0, (a, t) => a - t.amount);
+  double _transfers(Iterable<Txn> l, {required bool out}) => l
+      .where((t) => t.type == TxnType.transfer && (out ? t.amount < 0 : t.amount > 0))
+      .fold(0.0, (a, t) => a + t.amount.abs());
 
   double spentIn(DateTime m) => _spent(txnsIn(m));
   double incomeIn(DateTime m) => _income(txnsIn(m));
 
-  /// Spending in the selected period.
+  /// Money out in the selected period: spending + bank charges.
   double get monthSpent => _spent(monthTxns);
   double get monthIncome => _income(monthTxns);
+  double get monthCharges => _charges(monthTxns);
+  double get monthSpendingOnly => monthSpent - monthCharges;
+  double get monthTransfersOut => _transfers(monthTxns, out: true);
+  double get monthTransfersIn => _transfers(monthTxns, out: false);
+
+  /// Income from payers seen in 2+ months (salary, allowance…), excluding one-offs.
+  double get monthRegularIncome => monthTxns.where(isRegularIncome).fold(0.0, (a, t) => a + t.amount);
 
   /// Months the selected period spans (for averages).
   int get periodMonths => allMonths ? (monthCount == 0 ? 1 : monthCount) : 1;
 
   double get avgMonthlySpent => monthSpent / periodMonths;
   double get avgMonthlyIncome => monthIncome / periodMonths;
+  double get avgMonthlyRegularIncome => monthRegularIncome / periodMonths;
 
   /// Average monthly spending on [cat] across every month with data.
   double avgSpendFor(Cat cat) {
     if (monthCount == 0) return 0;
-    final total = _txns.where((t) => t.cat == cat && t.amount < 0).fold(0.0, (a, t) => a - t.amount);
-    return total / monthCount;
+    final total = _txns.where((t) => t.cat == cat).fold(0.0, (a, t) => a - t.amount);
+    return total > 0 ? total / monthCount : 0;
   }
 
   /// Month-by-month totals, oldest first.
@@ -308,6 +489,70 @@ class SpendingStore extends ChangeNotifier {
   MonthSummary _summary(DateTime m) {
     final l = txnsIn(m);
     return MonthSummary(m, _spent(l), _income(l), l.length);
+  }
+
+  // ---- Charges ----------------------------------------------------------
+
+  /// What the per-transaction fees on the statement were for, in the period:
+  /// label → (count, total). These fees are usually deducted later as one
+  /// "service fees" line, which is what [monthCharges] counts — so this is a
+  /// breakdown, never added on top.
+  Map<String, (int, double)> get feeBreakdown {
+    final m = <String, (int, double)>{};
+    for (final t in monthTxns) {
+      if (t.fee <= 0) continue;
+      final label = switch (t.cat) {
+        Cat.cash => 'Cash withdrawals',
+        Cat.people => 'Sending money',
+        Cat.income => 'Money received',
+        Cat.transfer => 'Transfers',
+        _ => 'Card & other payments',
+      };
+      final cur = m[label] ?? (0, 0.0);
+      m[label] = (cur.$1 + 1, cur.$2 + t.fee);
+    }
+    final sorted = m.entries.toList()..sort((a, b) => b.value.$2.compareTo(a.value.$2));
+    return {for (final e in sorted) e.key: e.value};
+  }
+
+  double get monthAccruedFees => monthTxns.fold(0.0, (a, t) => a + t.fee);
+
+  // ---- Flow diagram -----------------------------------------------------
+
+  /// Money in on the left; where it went on the right.
+  FlowData get flow {
+    final income = monthIncome;
+    final outs = categorySpend;
+    final totalOut = outs.values.fold(0.0, (a, b) => a + b);
+    return FlowData(
+      income: income,
+      fromBalance: totalOut > income ? totalOut - income : 0,
+      outflows: outs,
+      leftOver: income > totalOut ? income - totalOut : 0,
+      transfersOut: monthTransfersOut,
+      transfersIn: monthTransfersIn,
+    );
+  }
+
+  // ---- Books check --------------------------------------------------------
+
+  /// Opening + income − spending − charges ± transfers should equal the
+  /// closing balance printed on the statement.
+  BooksCheck? booksCheck(StatementRecord st) {
+    final from = st.periodStart, to = st.periodEnd;
+    if (from == null || to == null) return null;
+    final l = _txns.where((t) => !t.date.isBefore(from) && !t.date.isAfter(to)).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    double sumOf(TxnType type) => l.where((t) => t.type == type).fold(0.0, (a, t) => a + t.amount);
+    return BooksCheck(
+      opening: st.openingBalance,
+      closing: st.closingBalance,
+      income: sumOf(TxnType.income),
+      spending: sumOf(TxnType.spending),
+      charges: sumOf(TxnType.charge),
+      transfers: sumOf(TxnType.transfer),
+      flagged: l.where((t) => t.flagged).toList(),
+    );
   }
 
   DateTime get _prevMonth => DateTime(month.year, month.month - 1);
@@ -332,13 +577,15 @@ class SpendingStore extends ChangeNotifier {
     return (monthSpent - p) / p;
   }
 
-  /// Spending per category in the period, biggest first. Income excluded.
+  /// Money out per category (spending + bank charges), biggest first.
+  /// Income and transfers are excluded.
   Map<Cat, double> get categorySpend {
     final m = <Cat, double>{};
     for (final t in monthTxns) {
-      if (t.amount >= 0) continue;
+      if (!t.cat.isOutflow) continue;
       m[t.cat] = (m[t.cat] ?? 0) - t.amount;
     }
+    m.removeWhere((_, v) => v <= 0.005);
     final sorted = m.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     return {for (final e in sorted) e.key: e.value};
   }
@@ -392,27 +639,26 @@ class SpendingStore extends ChangeNotifier {
   String get insight {
     if (!hasData) return 'Upload a statement to see where your money goes.';
     final spent = monthSpent;
-    if (spent == 0) return 'No spending recorded in $periodLabel.';
+    final income = monthIncome;
     final cats = categorySpend;
+    if (cats.isEmpty) return 'No spending recorded in $periodLabel.';
     final top = cats.entries.first;
-    final topShare = (top.value / spent * 100).round();
-    final topLine = '${top.key.label} is your biggest category at $topShare% (${pula(top.value, decimals: false)}).';
+    final topShare = spent <= 0 ? 0 : (top.value / spent * 100).round();
+    final topLine = '${top.key.label} is your biggest at $topShare% (${pula(top.value, decimals: false)}).';
+    final balance = income - spent;
+    final net = balance >= 0
+        ? 'You kept ${pula(balance, decimals: false)} of the ${pula(income, decimals: false)} that came in.'
+        : 'You spent ${pula(-balance, decimals: false)} more than came in.';
+    final charges = monthCharges > 0 ? ' Bank charges: ${pula(monthCharges, decimals: false)}.' : '';
 
     if (allMonths && isMultiMonth) {
-      final sums = monthSummaries;
-      final highest = sums.reduce((a, b) => a.spent >= b.spent ? a : b);
-      return 'Over $monthCount months you spent ${pula(spent, decimals: false)}, '
-          'about ${pula(avgMonthlySpent, decimals: false)} a month. '
-          '${monthLong(highest.month)} was the highest at ${pula(highest.spent, decimals: false)}. $topLine';
+      return 'Over $monthCount months: $net About ${pula(avgMonthlySpent, decimals: false)} out a month. $topLine$charges';
     }
-
     final change = changeVsPrev;
-    if (change == null) return topLine;
-    final pct = (change.abs() * 100).round();
-    if (pct == 0) return 'Same spending as last month. $topLine';
-    return change < 0
-        ? "You've spent $pct% less than last month. $topLine"
-        : "You've spent $pct% more than last month. $topLine";
+    final trend = change == null || (change.abs() * 100).round() == 0
+        ? ''
+        : ' ${(change.abs() * 100).round()}% ${change < 0 ? 'less' : 'more'} spending than last month.';
+    return '$net$trend $topLine$charges';
   }
 
   /// Shown after an upload so the user can check the dates were read right.

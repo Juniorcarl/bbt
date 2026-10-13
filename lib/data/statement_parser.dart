@@ -11,8 +11,19 @@ class ParsedStatement {
   final List<Txn> txns;
   final String? bank;
   final String? accountTail; // last 4 digits
+  final double? openingBalance;
   final double? closingBalance;
-  const ParsedStatement(this.txns, {this.bank, this.accountTail, this.closingBalance});
+  const ParsedStatement(this.txns, {this.bank, this.accountTail, this.openingBalance, this.closingBalance});
+
+  /// Lines whose amount didn't match the change in running balance.
+  int get flaggedCount => txns.where((t) => t.flagged).length;
+
+  /// opening + every amount − closing. 0 when the books balance.
+  double? get difference {
+    if (openingBalance == null || closingBalance == null) return null;
+    final sum = txns.fold(0.0, (a, t) => a + t.amount);
+    return ((openingBalance! + sum - closingBalance!) * 100).roundToDouble() / 100;
+  }
 }
 
 class StatementParseException implements Exception {
@@ -254,15 +265,33 @@ const _headerWords = ['date', 'description', 'details', 'balance', 'debit', 'cre
 // Text statements (PDF text, or CSV without a header)
 // ---------------------------------------------------------------------------
 
+class _Line {
+  final DateTime date;
+  final String rest;
+  final List<_Amt> amts;
+  const _Line(this.date, this.rest, this.amts);
+}
+
+class _Reading {
+  final int amountIdx;
+  final double amount; // signed
+  final double? balance;
+  final double fee;
+  final bool reconciled;
+  const _Reading(this.amountIdx, this.amount, this.balance, this.fee, this.reconciled);
+}
+
 /// Reads transactions line by line. A transaction line starts with a date and
-/// ends with one or more amounts. When there are two or more amounts the last
-/// is the running balance, which also tells us whether money went in or out.
+/// ends with numbers. Which number is the amount, the running balance or a
+/// fee differs between banks, so instead of trusting column positions we try
+/// the possible readings and keep the one where
+/// `previous balance ± amount = this balance`.
 ParsedStatement parseStatementText(String text) {
   final year = _likelyYear(text);
   final periodStart = _earliestFullDate(text);
-  final txns = <Txn>[];
-  double? prevBalance;
-  double? lastBalance;
+  var lines = <_Line>[];
+  double? openingMarker;
+  double? closingMarker;
   int? lastMonth;
   var yearShift = 0;
 
@@ -271,13 +300,16 @@ ParsedStatement parseStatementText(String text) {
     if (line.length < 8) continue;
     final lower = line.toLowerCase();
 
-    // Opening / closing balance lines only update the running balance.
+    // Opening / closing balance lines.
     if (_balanceMarkers.any(lower.contains)) {
       final a = _amounts(line);
       if (a.isNotEmpty) {
         final b = a.last.signedOrPositive;
-        prevBalance ??= b;
-        if (lower.contains('closing') || lower.contains('carried')) lastBalance = b;
+        if (lower.contains('closing') || lower.contains('carried')) {
+          closingMarker = b;
+        } else {
+          openingMarker ??= b;
+        }
       }
       continue;
     }
@@ -306,46 +338,89 @@ ParsedStatement parseStatementText(String text) {
 
     final amts = _amounts(rest);
     if (amts.isEmpty) continue;
+    final descEnd = rest.substring(0, amts.first.start).toLowerCase();
+    if (_headerWords.where(descEnd.contains).length >= 2) continue; // repeated header row
+    lines.add(_Line(date, rest, amts));
+  }
 
-    final hasBalance = amts.length >= 2;
-    final amt = hasBalance ? amts[amts.length - 2] : amts.last;
-    final balance = hasBalance ? amts.last.signedOrPositive : null;
-    final desc = rest.substring(0, amt.start).replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (_headerWords.where((w) => desc.toLowerCase().contains(w)).length >= 2) continue; // repeated header row
-    if (amt.value == 0) continue;
+  // Newest-first statements: walk them oldest-first so balances chain.
+  if (lines.length >= 2 && lines.first.date.isAfter(lines.last.date)) {
+    lines = lines.reversed.toList();
+  }
 
-    double? signed;
-    if (amt.sign != null) {
-      signed = amt.value * amt.sign!;
-    } else if (balance != null && prevBalance != null) {
-      final delta = balance - prevBalance;
-      if ((delta - amt.value).abs() < 0.015) {
-        signed = amt.value;
-      } else if ((delta + amt.value).abs() < 0.015) {
-        signed = -amt.value;
-      }
-    }
-    signed ??= looksLikeIncome(desc) ? amt.value : -amt.value;
-
-    if (balance != null) {
-      prevBalance = balance;
-      lastBalance = balance;
-    }
-    txns.add(_txn(desc, date, signed));
+  final txns = <Txn>[];
+  double? prev = openingMarker;
+  double? firstOpening;
+  for (final l in lines) {
+    final r = _read(l, prev);
+    if (r == null || r.amount == 0) continue;
+    final desc = l.rest.substring(0, l.amts[r.amountIdx].start).replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (txns.isEmpty && r.balance != null) firstOpening = r.balance! - r.amount;
+    txns.add(_txn(desc, l.date, r.amount, fee: r.fee, balance: r.balance, flagged: !r.reconciled));
+    if (r.balance != null) prev = r.balance;
   }
 
   return ParsedStatement(
     txns,
     bank: _detectBank(text),
     accountTail: _detectAccountTail(text),
-    closingBalance: lastBalance,
+    openingBalance: _round(openingMarker ?? firstOpening),
+    closingBalance: _round(closingMarker ?? prev),
   );
 }
 
-Txn _txn(String desc, DateTime date, double amount) {
+double? _round(double? v) => v == null ? null : (v * 100).roundToDouble() / 100;
+
+/// Picks which number on the line is the amount, the balance and the fee.
+_Reading? _read(_Line l, double? prev) {
+  final a = l.amts;
+  if (a.length == 1) {
+    // Amount only (no running balance on this statement).
+    final t = a.first;
+    final desc = l.rest.substring(0, t.start);
+    final sign = t.sign ?? (looksLikeIncome(desc) ? 1 : -1);
+    return _Reading(0, t.value * sign, null, 0, true);
+  }
+
+  double feeAfter(int b) => (a.length - b - 1) == 1 ? a.last.value : 0;
+
+  // 1. Readings that make the running balance add up. Prefer the balance
+  //    furthest right (fee columns sit after it, so try those next).
+  if (prev != null) {
+    for (var b = a.length - 1; b >= 1; b--) {
+      if (a.length - b - 1 > 1) continue; // at most one fee column after the balance
+      final balance = a[b].signedOrPositive;
+      final amt = a[b - 1];
+      final delta = balance - prev;
+      for (final sign in amt.sign != null ? [amt.sign!] : const [-1, 1]) {
+        if ((delta - amt.value * sign).abs() < 0.015) {
+          return _Reading(b - 1, amt.value * sign, balance, feeAfter(b), true);
+        }
+      }
+    }
+  }
+
+  // 2. No previous balance yet (first line), or nothing adds up:
+  //    the balance is the last number marked Cr/Dr/−, else the last number.
+  var b = -1;
+  for (var i = a.length - 1; i >= 1; i--) {
+    if (a[i].sign != null) {
+      b = i;
+      break;
+    }
+  }
+  if (b < 1) b = a.length - 1;
+  final amt = a[b - 1];
+  final desc = l.rest.substring(0, amt.start);
+  final sign = amt.sign ?? (looksLikeIncome(desc) ? 1 : -1);
+  return _Reading(b - 1, amt.value * sign, a[b].signedOrPositive, feeAfter(b), prev == null);
+}
+
+Txn _txn(String desc, DateTime date, double amount, {double fee = 0, double? balance, bool flagged = false}) {
   final (cat, sub) = categorize(desc, amount);
   final source = sub == 'Uncategorised' ? CatSource.none : CatSource.rule;
-  return Txn(cleanName(desc), cat, sub, date, amount, raw: desc, source: source);
+  return Txn(cleanName(desc), cat, sub, date, amount,
+      raw: desc, source: source, fee: fee, balance: balance, flagged: flagged);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +506,6 @@ ParsedStatement? parseCsv(String raw) {
   String cell(List<String> row, int? i) => (i != null && i < row.length) ? row[i] : '';
 
   final txns = <Txn>[];
-  double? lastBalance;
   for (final row in rows.skip(headerAt + 1)) {
     final date = parseDateLoose(cell(row, dateCol));
     if (date == null) continue;
@@ -448,14 +522,23 @@ ParsedStatement? parseCsv(String raw) {
     }
     if (amount == null || amount == 0) continue;
     final bal = parseMoney(cell(row, balanceCol));
-    if (bal != null) lastBalance = bal;
-    txns.add(_txn(desc.isEmpty ? 'Transaction' : desc, date, amount));
+    txns.add(_txn(desc.isEmpty ? 'Transaction' : desc, date, amount, balance: bal));
   }
 
+  // Oldest first, so opening/closing come from the right ends.
+  if (txns.length >= 2 && txns.first.date.isAfter(txns.last.date)) {
+    final r = txns.reversed.toList();
+    txns
+      ..clear()
+      ..addAll(r);
+  }
+  final first = txns.isEmpty ? null : txns.first;
+  final last = txns.isEmpty ? null : txns.last;
   return ParsedStatement(
     txns,
     bank: _detectBank(raw),
     accountTail: _detectAccountTail(raw),
-    closingBalance: lastBalance,
+    openingBalance: (first != null && first.balance != null) ? _round(first.balance! - first.amount) : null,
+    closingBalance: last?.balance,
   );
 }

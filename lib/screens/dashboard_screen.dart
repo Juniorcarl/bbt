@@ -4,6 +4,7 @@ import '../data/models.dart';
 import '../data/spending_store.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
+import '../widgets/charts.dart';
 import '../widgets/common.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -22,7 +23,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       listenable: store,
       builder: (context, _) => SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
-          SectionTitle('Spending', subtitle: store.hasData ? store.periodLabel : null),
+          SectionTitle('Cash flow', subtitle: store.hasData ? store.periodLabel : null),
           if (store.isMultiMonth) ...[
             const SizedBox(height: 12),
             const MonthChips(),
@@ -44,27 +45,98 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final total = cats.values.fold(0.0, (a, b) => a + b);
     final change = store.changeVsPrev;
 
+    final income = store.monthIncome;
+    final out = store.monthSpent;
+    final net = income - out;
+    final flow = store.flow;
+    final fees = store.feeBreakdown;
+
     return [
+      // Money in / out / left over
       BCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(store.allMonths && store.isMultiMonth ? 'Total spent over ${store.monthCount} months' : 'Total spent',
-              style: const TextStyle(color: AppColors.muted)),
-          FittedBox(
-            child: Text(pula(store.monthSpent),
-                style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.ink)),
+          Row(children: [
+            _Figure('Money in', income, AppColors.income),
+            _Figure('Money out', out, AppColors.ink),
+            _Figure(net >= 0 ? 'Left over' : 'Overspent', net.abs(),
+                net >= 0 ? const Color(0xFF5BB0E8) : const Color(0xFFD0573F)),
+          ]),
+          const SizedBox(height: 10),
+          Text(
+            [
+              if (change != null) '${(change.abs() * 100).round()}% ${change <= 0 ? 'less' : 'more'} spending than last month',
+              if (store.allMonths && store.isMultiMonth) 'About ${pula(store.avgMonthlySpent, decimals: false)} out a month',
+              'Includes ${pula(store.monthCharges, decimals: false)} bank charges',
+            ].join(' · '),
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
-          const SizedBox(height: 4),
-          if (change != null)
+          if (flow.transfersOut > 0 || flow.transfersIn > 0) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Cat.transfer.icon, size: 16, color: AppColors.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Moved between your accounts: ${pula(flow.transfersOut, decimals: false)} out, '
+                  '${pula(flow.transfersIn, decimals: false)} back in (not counted)',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+            ]),
+          ],
+        ]),
+      ),
+      const SizedBox(height: 14),
+
+      // Where the money went
+      BCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Where your money went',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
+          const SizedBox(height: 14),
+          FlowChart(flow),
+        ]),
+      ),
+      const SizedBox(height: 14),
+
+      // Bank charges
+      BCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Cat.charges.icon, color: Cat.charges.color),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Bank charges',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
+            ),
+            Text(pula(store.monthCharges), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ]),
+          const SizedBox(height: 8),
+          if (fees.isEmpty)
             Text(
-              '${(change.abs() * 100).round()}% ${change <= 0 ? 'less' : 'more'} than last month',
-              style: TextStyle(color: change <= 0 ? AppColors.income : const Color(0xFFD0573F)),
+              store.monthCharges > 0
+                  ? 'Fees and service charges deducted by your bank in this period.'
+                  : 'No bank charges in this period.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
             )
-          else if (store.allMonths && store.isMultiMonth)
-            Text('About ${pula(store.avgMonthlySpent, decimals: false)} a month · ${store.monthTxns.length} transactions',
-                style: const TextStyle(color: AppColors.muted))
-          else
-            Text('${store.monthTxns.length} transactions in ${monthLong(store.month)}',
-                style: const TextStyle(color: AppColors.muted)),
+          else ...[
+            const Text('What caused them (fees your bank listed per transaction):',
+                style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 6),
+            for (final e in fees.entries)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  Expanded(child: Text(e.key)),
+                  Text('${e.value.$1} × ', style: const TextStyle(color: AppColors.muted)),
+                  SizedBox(
+                    width: 84,
+                    child: Text(pula(e.value.$2), textAlign: TextAlign.right,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ]),
+              ),
+          ],
         ]),
       ),
       const SizedBox(height: 14),
@@ -113,7 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(children: [
           const Align(
             alignment: Alignment.centerLeft,
-            child: Text('Spending by category',
+            child: Text('Money out by category',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
           ),
           const SizedBox(height: 12),
@@ -156,4 +228,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     ];
   }
+}
+
+class _Figure extends StatelessWidget {
+  final String label;
+  final double value;
+  final Color color;
+  const _Figure(this.label, this.value, this.color);
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 2),
+          FittedBox(
+            child: Text(pula(value, decimals: false),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+          ),
+        ]),
+      );
 }

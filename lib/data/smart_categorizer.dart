@@ -115,27 +115,55 @@ class SmartCategorizer {
 
   // ---- Predicting ---------------------------------------------------------
 
+  /// Counterparty keys ("gg", "savings") that are the user's own accounts.
+  Set<String> ownAccounts = {};
+
+  /// The user's phone number (last 8 digits), to tell "cash for myself" from
+  /// "sent to someone" on eWallet / pay-to-cell lines.
+  String? ownPhone;
+
   CategoryGuess classify(String text, String name, double amount) {
-    // 1. Merchant memory always wins.
+    // 1. What the user taught for this merchant always wins.
     final remembered = _merchant[merchantKey(name)];
     if (remembered != null) return CategoryGuess(remembered, remembered.label, CatSource.user, 1);
 
-    // Money in is income unless the user taught otherwise.
-    if (amount > 0) {
-      final (cat, sub) = categorize(text, amount);
-      return CategoryGuess(cat, sub, CatSource.rule, 1);
+    // 2. Transfers between the user's own accounts.
+    final cp = counterparty(text);
+    if (cp != null && ownAccounts.contains(cp.$3)) {
+      return const CategoryGuess(Cat.transfer, 'Between your accounts', CatSource.rule, 1);
+    }
+    if (isTransferPhrase(text)) {
+      return const CategoryGuess(Cat.transfer, 'Between your accounts', CatSource.rule, 1);
+    }
+
+    // 3. Money in.
+    if (amount > 0) return CategoryGuess(Cat.income, incomeKind(text), CatSource.rule, 1);
+
+    // 4. Bank charges.
+    if (isChargeText(text)) return const CategoryGuess(Cat.charges, 'Bank charges', CatSource.rule, 1);
+
+    // 5. Sending to / withdrawing via the user's own phone = cash for themselves.
+    final phone = ownPhone;
+    if (phone != null && phone.isNotEmpty && (isSendText(text) || isWithdrawalText(text)) &&
+        phoneNumbers(text).contains(phone)) {
+      return const CategoryGuess(Cat.cash, 'Cash for yourself', CatSource.rule, 1);
+    }
+
+    // 6. A transfer to someone who isn't one of the user's accounts.
+    if (cp != null && cp.$1 == 'transfer' && cp.$2 == 'to') {
+      return const CategoryGuess(Cat.people, 'Sent to people', CatSource.rule, 1);
     }
 
     final rule = ruleMatch(text);
     final model = predict(text, amount);
 
-    // 2. A confident model guess backed by words the user taught overrides a rule.
+    // 7. A confident model guess backed by words the user taught overrides a rule.
     if (model != null && model.$2 >= 0.85 && _sharesUserWord(text, model.$1)) {
       return CategoryGuess(model.$1, model.$1.label, CatSource.model, model.$2);
     }
-    // 3. Keyword rule.
+    // 8. Keyword rule.
     if (rule != null) return CategoryGuess(rule.$1, rule.$2, CatSource.rule, 1);
-    // 4. Model guess for anything the rules don't know.
+    // 9. Model guess for anything the rules don't know.
     if (model != null && model.$2 >= minConfidence) {
       return CategoryGuess(model.$1, model.$1.label, CatSource.model, model.$2);
     }
@@ -153,7 +181,7 @@ class SmartCategorizer {
     const alpha = 0.5;
     final scores = <Cat, double>{};
     for (final cat in _featCounts.keys) {
-      if (cat == Cat.income) continue;
+      if (cat.type != TxnType.spending) continue; // income, charges and transfers come from rules
       final counts = _featCounts[cat]!;
       final total = _totals[cat] ?? 0;
       var s = 0.0; // uniform prior: seed lists have very different sizes

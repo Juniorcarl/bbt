@@ -8,6 +8,9 @@
 create table if not exists public.profiles (
   id          uuid primary key references auth.users (id) on delete cascade,
   full_name   text not null default '',
+  phone             text not null default '',
+  own_accounts      text[] not null default '{}',   -- counterparties confirmed as the user's own accounts
+  not_own_accounts  text[] not null default '{}',
   created_at  timestamptz not null default now()
 );
 
@@ -33,7 +36,9 @@ create table if not exists public.statements (
   file_name       text not null,
   bank            text,
   account_tail    text,
+  opening_balance numeric(14, 2),
   closing_balance numeric(14, 2),
+  flagged_lines   int not null default 0,
   period_start    date,
   period_end      date,
   txn_count       int not null default 0,
@@ -58,6 +63,9 @@ create table if not exists public.transactions (
   sub           text not null default '',
   source        text not null default 'rule',  -- rule | model | user | none
   confidence    real not null default 1,
+  fee           numeric(14, 2) not null default 0,  -- per-transaction fee column, if the bank prints one
+  balance       numeric(14, 2),                     -- running balance after this transaction
+  flagged       boolean not null default false,     -- amount didn't match the change in balance
   fingerprint   text not null,
   created_at    timestamptz not null default now(),
   unique (user_id, fingerprint)

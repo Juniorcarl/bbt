@@ -114,9 +114,9 @@ class _HomeScreenState extends State<HomeScreen> {
       const _AccountCard(),
       const SizedBox(height: 14),
       Row(children: [
-        Expanded(child: _MiniStat('${store.periodName} spending', store.monthSpent)),
+        Expanded(child: _MiniStat('Money in', store.monthIncome)),
         const SizedBox(width: 12),
-        Expanded(child: _MiniStat('${store.periodName} money in', store.monthIncome)),
+        Expanded(child: _MiniStat('Money out', store.monthSpent)),
       ]),
       const SizedBox(height: 14),
       BCard(
@@ -131,6 +131,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (store.allMonths && store.isMultiMonth) ...[
         const SizedBox(height: 14),
         const MonthBreakdown(),
+      ],
+      if (store.pendingOwnAccounts.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        const _OwnAccountsCard(),
       ],
       if (store.needsReview > 0) ...[
         const SizedBox(height: 14),
@@ -260,6 +264,58 @@ class _AccountCard extends StatelessWidget {
                 style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.ink)),
           ),
         ],
+      ]),
+    );
+  }
+}
+
+/// "Are these your own accounts?" for transfer names bbt detected.
+class _OwnAccountsCard extends StatelessWidget {
+  const _OwnAccountsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = store.pendingOwnAccounts;
+    return BCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Cat.transfer.icon, color: AppColors.primary),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text('Are these your own accounts?',
+                style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink)),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        const Text(
+          "Money moves to and from these like your own savings or accounts, so bbt doesn't count it as income or "
+          'spending. Tap ✗ for any that are other people.',
+          style: TextStyle(fontSize: 12, color: AppColors.muted),
+        ),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final k in keys)
+            InputChip(
+              label: Text(k.toUpperCase()),
+              onDeleted: () => store.confirmOwnAccount(k, false),
+              deleteIcon: const Icon(Icons.close, size: 16),
+              onPressed: () => store.confirmOwnAccount(k, true),
+              avatar: const Icon(Icons.check, size: 16),
+            ),
+        ]),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () async {
+              for (final k in keys) {
+                await store.confirmOwnAccount(k, true);
+              }
+            },
+            child: const Text('Yes, all mine'),
+          ),
+        ),
       ]),
     );
   }

@@ -10,7 +10,9 @@ class StatementRecord {
   final String fileName;
   final String? bank;
   final String? accountTail;
+  final double? openingBalance;
   final double? closingBalance;
+  final int flaggedLines;
   final DateTime? periodStart;
   final DateTime? periodEnd;
   final int txnCount;
@@ -21,7 +23,9 @@ class StatementRecord {
     required this.fileName,
     this.bank,
     this.accountTail,
+    this.openingBalance,
     this.closingBalance,
+    this.flaggedLines = 0,
     this.periodStart,
     this.periodEnd,
     required this.txnCount,
@@ -33,12 +37,23 @@ class StatementRecord {
         fileName: r['file_name'] as String,
         bank: r['bank'] as String?,
         accountTail: r['account_tail'] as String?,
+        openingBalance: (r['opening_balance'] as num?)?.toDouble(),
         closingBalance: (r['closing_balance'] as num?)?.toDouble(),
+        flaggedLines: (r['flagged_lines'] as num?)?.toInt() ?? 0,
         periodStart: r['period_start'] == null ? null : DateTime.parse(r['period_start'] as String),
         periodEnd: r['period_end'] == null ? null : DateTime.parse(r['period_end'] as String),
         txnCount: (r['txn_count'] as num?)?.toInt() ?? 0,
         uploadedAt: DateTime.parse(r['uploaded_at'] as String).toLocal(),
       );
+}
+
+/// The user's profile row.
+class Profile {
+  final String name;
+  final String phone;
+  final Set<String> ownAccounts;
+  final Set<String> notOwnAccounts;
+  const Profile(this.name, this.phone, this.ownAccounts, this.notOwnAccounts);
 }
 
 /// Result of saving a statement.
@@ -58,11 +73,33 @@ class Backend {
 
   // ---- Profile ------------------------------------------------------------
 
-  Future<String> fetchName() async {
-    final row = await _db.from('profiles').select('full_name').eq('id', _uid).maybeSingle();
-    final name = (row?['full_name'] as String?)?.trim() ?? '';
-    if (name.isNotEmpty) return name;
-    return (user?.userMetadata?['full_name'] as String?)?.trim() ?? '';
+  Future<Profile> fetchProfile() async {
+    final row = await _db
+        .from('profiles')
+        .select('full_name, phone, own_accounts, not_own_accounts')
+        .eq('id', _uid)
+        .maybeSingle();
+    var name = (row?['full_name'] as String?)?.trim() ?? '';
+    if (name.isEmpty) name = (user?.userMetadata?['full_name'] as String?)?.trim() ?? '';
+    Set<String> set(Object? v) => {for (final x in (v as List?) ?? const []) x.toString()};
+    return Profile(
+      name,
+      (row?['phone'] as String?) ?? '',
+      set(row?['own_accounts']),
+      set(row?['not_own_accounts']),
+    );
+  }
+
+  Future<void> updatePhone(String phone) async {
+    await _db.from('profiles').update({'phone': phone}).eq('id', _uid);
+  }
+
+  Future<void> updateOwnAccounts(Set<String> own, Set<String> notOwn) async {
+    await _db.from('profiles').update({
+      'own_accounts': own.toList()..sort(),
+      'not_own_accounts': notOwn.toList()..sort(),
+    }).eq('id', _uid);
+    await log('own_accounts_updated', {'own': own.length, 'not_own': notOwn.length});
   }
 
   Future<void> updateName(String name) async {
@@ -80,7 +117,7 @@ class Backend {
     for (var from = 0;; from += page) {
       final rows = await _db
           .from('transactions')
-          .select('id, date, name, raw, amount, category, sub, source, confidence')
+          .select('id, date, name, raw, amount, category, sub, source, confidence, fee, balance, flagged')
           .eq('user_id', _uid)
           .order('date', ascending: false)
           .order('id')
@@ -96,6 +133,9 @@ class Backend {
           raw: r['raw'] as String? ?? '',
           source: CatSource.values.asNameMap()[r['source']] ?? CatSource.rule,
           confidence: (r['confidence'] as num?)?.toDouble() ?? 1,
+          fee: (r['fee'] as num?)?.toDouble() ?? 0,
+          balance: (r['balance'] as num?)?.toDouble(),
+          flagged: r['flagged'] as bool? ?? false,
         ));
       }
       if (rows.length < page) break;
@@ -114,7 +154,9 @@ class Backend {
           'file_name': fileName,
           'bank': s.bank,
           'account_tail': s.accountTail,
+          'opening_balance': s.openingBalance,
           'closing_balance': s.closingBalance,
+          'flagged_lines': s.flaggedCount,
           'period_start': dates.isEmpty ? null : _day(dates.first),
           'period_end': dates.isEmpty ? null : _day(dates.last),
           'txn_count': txns.length,
@@ -141,6 +183,9 @@ class Backend {
         'sub': t.sub,
         'source': t.source.name,
         'confidence': t.confidence,
+        'fee': t.fee,
+        'balance': t.balance,
+        'flagged': t.flagged,
         'fingerprint': '$base|$n',
       });
     }
@@ -159,6 +204,8 @@ class Backend {
       'bank': s.bank,
       'read': txns.length,
       'added': added,
+      'flagged': s.flaggedCount,
+      'difference': s.difference,
       'from': dates.isEmpty ? null : _day(dates.first),
       'to': dates.isEmpty ? null : _day(dates.last),
     });
@@ -247,6 +294,14 @@ class Backend {
   }
 
   // ---- Account ------------------------------------------------------------
+
+  /// Deletes every statement and transaction (keeps budgets and learning),
+  /// so statements can be uploaded and read again.
+  Future<void> deleteAllStatements() async {
+    await _db.from('transactions').delete().eq('user_id', _uid);
+    await _db.from('statements').delete().eq('user_id', _uid);
+    await log('statements_cleared');
+  }
 
   /// Deletes all of the user's data (statements, transactions, lessons, budgets).
   /// The login itself stays; deleting it needs the dashboard (service role).

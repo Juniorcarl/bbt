@@ -3,7 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/models.dart';
 import '../data/spending_store.dart';
+import '../data/categorizer.dart';
 import '../services/backend.dart';
+import 'books_check_screen.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -41,6 +43,17 @@ class ProfileScreen extends StatelessWidget {
               onTap: () => _editName(context),
             ),
             ListTile(
+              leading: const Icon(Icons.phone_iphone),
+              title: const Text('Your phone number'),
+              subtitle: Text(store.phone.isNotEmpty
+                  ? store.phone
+                  : (store.suggestedPhone != null
+                      ? 'Not set · looks like ${store.suggestedPhone} from your airtime'
+                      : 'Not set')),
+              trailing: const Icon(Icons.edit_outlined, size: 18),
+              onTap: () => _editPhone(context),
+            ),
+            ListTile(
               leading: const Icon(Icons.lock_outline),
               title: const Text('Change password'),
               trailing: const Icon(Icons.chevron_right),
@@ -66,6 +79,57 @@ class ProfileScreen extends StatelessWidget {
               title: const Text('Upload a statement', style: TextStyle(color: AppColors.primary)),
               onTap: () => importStatement(context),
             ),
+            if (store.statements.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.refresh),
+                title: const Text('Clear statements to upload again'),
+                subtitle: const Text('Keeps your budgets and what bbt learned'),
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  if (await _confirm(context, 'Clear all statements?',
+                      'All statements and transactions are removed so you can upload them again. '
+                          'Budgets and categories you taught bbt are kept.',
+                      'Clear')) {
+                    try {
+                      await store.clearStatements();
+                    } catch (_) {
+                      messenger.showSnackBar(const SnackBar(content: Text("Couldn't clear. Check your connection.")));
+                    }
+                  }
+                },
+              ),
+          ]),
+        ),
+
+        const _Header('Your own accounts'),
+        BCard(
+          padding: EdgeInsets.zero,
+          child: Column(children: [
+            const ListTile(
+              leading: Icon(Icons.swap_horiz),
+              title: Text('Transfers to and from these are not counted'),
+              subtitle: Text('Detected from your statements. Tap one to change it.'),
+            ),
+            for (final k in (store.ownAccounts.toList()..sort()))
+              ListTile(
+                dense: true,
+                title: Text(k.toUpperCase()),
+                subtitle: Text(store.confirmedOwn.contains(k) ? 'Confirmed as yours' : 'Detected — not confirmed'),
+                trailing: TextButton(
+                  onPressed: () => store.confirmOwnAccount(k, false),
+                  child: const Text('Not mine'),
+                ),
+              ),
+            for (final k in (store.rejectedOwn.toList()..sort()))
+              ListTile(
+                dense: true,
+                title: Text(k.toUpperCase()),
+                subtitle: const Text('Marked as not yours'),
+                trailing: TextButton(
+                  onPressed: () => store.confirmOwnAccount(k, true),
+                  child: const Text("It's mine"),
+                ),
+              ),
           ]),
         ),
 
@@ -156,6 +220,44 @@ class ProfileScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _editPhone(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final controller = TextEditingController(text: store.phone.isNotEmpty ? store.phone : (store.suggestedPhone ?? ''));
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your phone number'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+            'Used to tell money you send to yourself (cash) from money you send to other people.',
+            style: TextStyle(color: AppColors.muted),
+          ),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(labelText: 'e.g. 71234567'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+    if (value.trim().isNotEmpty && normalisePhone(value).length < 8) {
+      messenger.showSnackBar(const SnackBar(content: Text('That number looks too short.')));
+      return;
+    }
+    try {
+      await store.setPhone(value);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text("Couldn't save. Check your connection.")));
+    }
+  }
+
   Future<void> _changePassword(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final controller = TextEditingController();
@@ -226,8 +328,14 @@ class _StatementTile extends StatelessWidget {
     final range = st.periodStart == null || st.periodEnd == null
         ? ''
         : '${shortDate(st.periodStart!)} ${st.periodStart!.year} – ${shortDate(st.periodEnd!)} ${st.periodEnd!.year} · ';
+    final check = store.booksCheck(st);
+    final diff = check?.difference;
     return ListTile(
-      leading: const Icon(Icons.description_outlined),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BooksCheckScreen(st))),
+      leading: Icon(
+        diff == null ? Icons.description_outlined : (diff.abs() < 0.01 ? Icons.check_circle : Icons.warning_amber_rounded),
+        color: diff == null ? null : (diff.abs() < 0.01 ? AppColors.income : const Color(0xFFD0573F)),
+      ),
       title: Text(st.bank ?? st.fileName, overflow: TextOverflow.ellipsis),
       subtitle: Text('$range${st.txnCount} new transactions\nUploaded ${shortDate(st.uploadedAt)} ${st.uploadedAt.year}'),
       isThreeLine: true,
