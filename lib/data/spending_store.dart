@@ -9,15 +9,19 @@ import 'statement_parser.dart';
 /// One row of the month-by-month breakdown.
 class MonthSummary {
   final DateTime month;
-  final double spent;
-  final double income;
+  final double spent; // spending + charges
+  final double income; // all money in, transfers excluded
   final int count;
-  const MonthSummary(this.month, this.spent, this.income, this.count);
+  final double charges;
+  final double movedToOwn; // net to own accounts
+  const MonthSummary(this.month, this.spent, this.income, this.count, {this.charges = 0, this.movedToOwn = 0});
   double get net => income - spent;
 }
 
 /// Numbers for the money-flow diagram.
 class FlowData {
+  final double earned;
+  final double received;
   final double income;
   final double fromBalance; // spent more than came in → came from savings/balance
   final Map<Cat, double> outflows;
@@ -25,6 +29,8 @@ class FlowData {
   final double transfersOut;
   final double transfersIn;
   const FlowData({
+    required this.earned,
+    required this.received,
     required this.income,
     required this.fromBalance,
     required this.outflows,
@@ -43,7 +49,11 @@ class BooksCheck {
   final double charges; // −
   final double transfers; // ±
   final List<Txn> flagged;
+
+  /// Fees total printed in the statement's own summary, to compare with [charges].
+  final double? statedCharges;
   const BooksCheck({
+    this.statedCharges,
     this.opening,
     this.closing,
     required this.income,
@@ -265,7 +275,9 @@ class SpendingStore extends ChangeNotifier {
   String _payerKey(Txn t) => counterparty(t.text)?.$3 ?? SmartCategorizer.merchantKey(t.name);
 
   /// Income from someone who paid in two or more different months.
-  bool isRegularIncome(Txn t) => t.type == TxnType.income && _regularPayers.contains(_payerKey(t));
+  /// Only earned income (salary, allowance…) can be regular; money from
+  /// people is "received", never income.
+  bool isRegularIncome(Txn t) => t.cat == Cat.income && _regularPayers.contains(_payerKey(t));
 
   /// Re-reads context from [list] (own accounts, phone, regular payers) and
   /// categorises every transaction with it.
@@ -278,7 +290,7 @@ class SpendingStore extends ChangeNotifier {
     final out = [for (final t in l) _categorise(t)];
     final months = <String, Set<String>>{};
     for (final t in out) {
-      if (t.type != TxnType.income) continue;
+      if (t.cat != Cat.income) continue;
       months.putIfAbsent(_payerKey(t), () => {}).add('${t.date.year}-${t.date.month}');
     }
     _regularPayers = {for (final e in months.entries) if (e.value.length >= 2) e.key};
@@ -460,7 +472,16 @@ class SpendingStore extends ChangeNotifier {
 
   /// Money out in the selected period: spending + bank charges.
   double get monthSpent => _spent(monthTxns);
+  /// All money in (income + received from people), excluding transfers.
   double get monthIncome => _income(monthTxns);
+  double get monthEarned => monthTxns.where((t) => t.cat == Cat.income).fold(0.0, (a, t) => a + t.amount);
+  double get monthReceived => monthTxns.where((t) => t.cat == Cat.received).fold(0.0, (a, t) => a + t.amount);
+
+  /// Net moved to the user's own accounts (positive = moved out).
+  double get monthMovedToOwn => monthTransfersOut - monthTransfersIn;
+
+  /// Change in this account's balance over the period (sum of everything).
+  double get monthBalanceChange => monthTxns.fold(0.0, (a, t) => a + t.amount);
   double get monthCharges => _charges(monthTxns);
   double get monthSpendingOnly => monthSpent - monthCharges;
   double get monthTransfersOut => _transfers(monthTxns, out: true);
@@ -488,7 +509,9 @@ class SpendingStore extends ChangeNotifier {
 
   MonthSummary _summary(DateTime m) {
     final l = txnsIn(m);
-    return MonthSummary(m, _spent(l), _income(l), l.length);
+    return MonthSummary(m, _spent(l), _income(l), l.length,
+        charges: _charges(l),
+        movedToOwn: _transfers(l, out: true) - _transfers(l, out: false));
   }
 
   // ---- Charges ----------------------------------------------------------
@@ -504,7 +527,7 @@ class SpendingStore extends ChangeNotifier {
       final label = switch (t.cat) {
         Cat.cash => 'Cash withdrawals',
         Cat.people => 'Sending money',
-        Cat.income => 'Money received',
+        Cat.income || Cat.received => 'Money received',
         Cat.transfer => 'Transfers',
         _ => 'Card & other payments',
       };
@@ -525,6 +548,8 @@ class SpendingStore extends ChangeNotifier {
     final outs = categorySpend;
     final totalOut = outs.values.fold(0.0, (a, b) => a + b);
     return FlowData(
+      earned: monthEarned,
+      received: monthReceived,
       income: income,
       fromBalance: totalOut > income ? totalOut - income : 0,
       outflows: outs,
@@ -552,6 +577,7 @@ class SpendingStore extends ChangeNotifier {
       charges: sumOf(TxnType.charge),
       transfers: sumOf(TxnType.transfer),
       flagged: l.where((t) => t.flagged).toList(),
+      statedCharges: st.statedCharges,
     );
   }
 

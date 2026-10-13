@@ -162,7 +162,7 @@ void main() {
       final s = _storeFor(parseStatementText(fnbStyle));
       await s.confirmOwnAccount('mm', false);
       expect(_find(s, 'Transfer To Mm').cat, Cat.people);
-      expect(_find(s, 'Transfer From Mm').cat, Cat.income);
+      expect(_find(s, 'Transfer From Mm').cat, Cat.received);
     });
   });
 
@@ -182,5 +182,80 @@ void main() {
     expect(_find(store, 'John Smith').cat, Cat.people);
     expect(_find(store, 'savings').cat, Cat.transfer);
     expect(store.monthIncome, 3000.00);
+  });
+
+  group('round 2 rules (any bank)', () {
+    // A different layout: ISO dates, minus signs, a summary block with several
+    // figures per line, and a fee line the bank printed without a description.
+    const summaryStyle = """
+Account summary
+Opening Balance 100.00 Cr     Service Fees 12.50 Dr     Interest Rate 0.00%
+Closing Balance 37.50 Cr      Cash Deposit Fees 0.50 Dr
+2026-05-01 Grocer Mart -50.00 50.00
+2026-05-31   -12.50 37.50
+""";
+
+    test('opening/closing take the figure right after the words', () {
+      final s = parseStatementText(summaryStyle);
+      expect(s.openingBalance, 100.00);
+      expect(s.closingBalance, 37.50);
+      expect(s.difference, 0);
+    });
+
+    test("the statement's own fee total is read", () {
+      expect(parseStatementText(summaryStyle).statedCharges, 13.00);
+    });
+
+    test('a debit with no description is a bank charge', () {
+      final store = _storeFor(parseStatementText(summaryStyle));
+      final fee = store.txns.firstWhere((t) => t.amount == -12.50);
+      expect(fee.cat, Cat.charges);
+      expect(fee.name, 'Bank fee');
+      expect(store.monthCharges, 12.50);
+    });
+
+    test('account codes can contain digits', () {
+      const text = """
+2026-04-01 Opening balance 500.00
+2026-04-02 Transfer to 8F -100.00 400.00
+2026-04-05 Transfer from 8F 40.00 440.00
+""";
+      final store = _storeFor(parseStatementText(text));
+      expect(store.ownAccounts, contains('8f'));
+      expect(store.monthIncome, 0);
+    });
+
+    test('money from people is received, not income; only income can be regular', () {
+      const text = """
+2026-04-01 Opening balance 0.00
+2026-04-25 Salary Acme Ltd 3000.00 3000.00
+2026-04-26 Payment from Jane Doe 500.00 3500.00
+2026-05-25 Salary Acme Ltd 3000.00 6500.00
+2026-05-26 Payment from Jane Doe 500.00 7000.00
+""";
+      final store = _storeFor(parseStatementText(text));
+      expect(_find(store, 'Jane Doe').cat, Cat.received);
+      expect(_find(store, 'Salary').cat, Cat.income);
+      expect(store.monthIncome, 7000.00); // all money in
+      expect(store.monthEarned, 6000.00);
+      expect(store.monthReceived, 1000.00);
+      expect(store.monthRegularIncome, 6000.00); // Jane is regular but not income
+    });
+
+    test('left over minus money moved to own accounts = change in balance', () {
+      final store = _storeFor(parseStatementText(fnbStyle));
+      final leftOver = store.monthIncome - store.monthSpent;
+      expect(leftOver - store.monthMovedToOwn, closeTo(store.monthBalanceChange, 0.001));
+      expect(store.monthBalanceChange, closeTo(1097.33 - 241.08, 0.001));
+    });
+
+    test('each month has its own money in and out', () {
+      final store = _storeFor(parseStatementText(fnbStyle));
+      final june = store.monthSummaries.single;
+      expect(june.income, closeTo(1750.00, 0.001));
+      expect(june.spent, closeTo(683.75, 0.001));
+      expect(june.charges, closeTo(23.85, 0.001));
+      expect(june.movedToOwn, closeTo(210.00, 0.001));
+    });
   });
 }

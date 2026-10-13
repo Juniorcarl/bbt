@@ -70,22 +70,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ].join(' · '),
             style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
+          if (store.monthEarned > 0 && store.monthReceived > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Money in: ${pula(store.monthEarned, decimals: false)} income + '
+              '${pula(store.monthReceived, decimals: false)} from people',
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          ],
           if (flow.transfersOut > 0 || flow.transfersIn > 0) ...[
-            const SizedBox(height: 8),
-            Row(children: [
-              Icon(Cat.transfer.icon, size: 16, color: AppColors.muted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Moved between your accounts: ${pula(flow.transfersOut, decimals: false)} out, '
-                  '${pula(flow.transfersIn, decimals: false)} back in (not counted)',
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
-              ),
-            ]),
+            const SizedBox(height: 10),
+            _Reconcile(net: net),
           ],
         ]),
       ),
+      if (store.isMultiMonth && store.allMonths) ...[
+        const SizedBox(height: 14),
+        const MonthBreakdown(),
+      ],
       const SizedBox(height: 14),
 
       // Where the money went
@@ -247,4 +249,38 @@ class _Figure extends StatelessWidget {
           ),
         ]),
       );
+}
+
+/// Ties "left over" to the real change in the account balance:
+/// left over − moved to your own accounts = change in this account.
+class _Reconcile extends StatelessWidget {
+  final double net;
+  const _Reconcile({required this.net});
+
+  @override
+  Widget build(BuildContext context) {
+    final moved = store.monthMovedToOwn;
+    final change = store.monthBalanceChange;
+    Widget row(String label, double v, {bool bold = false}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(fontSize: 12, color: bold ? AppColors.ink : AppColors.muted,
+                      fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+            ),
+            Text(pula(v, sign: true), style: TextStyle(fontSize: 12, fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: const Color(0xFFF3F6FA), borderRadius: BorderRadius.circular(12)),
+      child: Column(children: [
+        row(net >= 0 ? 'Left over' : 'Overspent', net),
+        row(moved >= 0 ? 'Moved to your own accounts' : 'Brought in from your own accounts', -moved),
+        const Divider(height: 10),
+        row('Change in this account', change, bold: true),
+      ]),
+    );
+  }
 }

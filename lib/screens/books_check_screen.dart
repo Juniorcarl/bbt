@@ -43,6 +43,21 @@ class BooksCheckScreen extends StatelessWidget {
               _Row('+ Money in', check.income),
               _Row('− Spending', check.spending),
               _Row('− Bank charges', check.charges),
+              if (check.statedCharges != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 12, bottom: 4),
+                  child: Text(
+                    (check.statedCharges! + check.charges).abs() < 0.01
+                        ? "✓ Matches the statement's own fee total (${pula(check.statedCharges!)})"
+                        : "⚠ The statement's own fee total is ${pula(check.statedCharges!)}",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: (check.statedCharges! + check.charges).abs() < 0.01
+                          ? AppColors.income
+                          : const Color(0xFFD0573F),
+                    ),
+                  ),
+                ),
               _Row('± Transfers between your accounts', check.transfers),
               const Divider(),
               _Row('= Should close at', check.expectedClosing, bold: true),

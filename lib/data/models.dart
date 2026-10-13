@@ -15,6 +15,7 @@ enum Cat {
   other,
   charges,
   income,
+  received,
   transfer,
 }
 
@@ -22,7 +23,7 @@ enum TxnType { income, spending, charge, transfer }
 
 extension CatX on Cat {
   TxnType get type => switch (this) {
-        Cat.income => TxnType.income,
+        Cat.income || Cat.received => TxnType.income,
         Cat.charges => TxnType.charge,
         Cat.transfer => TxnType.transfer,
         _ => TxnType.spending,
@@ -43,6 +44,7 @@ extension CatX on Cat {
         Cat.other: 'Other',
         Cat.charges: 'Bank charges',
         Cat.income: 'Income',
+        Cat.received: 'From people',
         Cat.transfer: 'Transfer',
       }[this]!;
 
@@ -58,6 +60,7 @@ extension CatX on Cat {
         Cat.other: Icons.more_horiz,
         Cat.charges: Icons.account_balance_outlined,
         Cat.income: Icons.south_west,
+        Cat.received: Icons.call_received,
         Cat.transfer: Icons.swap_horiz,
       }[this]!;
 
@@ -73,6 +76,7 @@ extension CatX on Cat {
         Cat.other: Color(0xFFB8C2D0),
         Cat.charges: Color(0xFFE8857A),
         Cat.income: Color(0xFF2E9E6B),
+        Cat.received: Color(0xFF7CC4A0),
         Cat.transfer: Color(0xFF9AA8B8),
       }[this]!;
 }
@@ -83,6 +87,9 @@ Cat? catFromName(String n) {
   }
   return null;
 }
+
+/// Description used when the bank printed none (often its own fee lines).
+const kNoDescription = 'Bank entry (no description)';
 
 /// Where a transaction's category came from.
 enum CatSource {

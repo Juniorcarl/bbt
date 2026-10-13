@@ -36,7 +36,8 @@ class FlowChart extends StatelessWidget {
   }
 
   List<(String, double, Color)> get _left => [
-        if (data.income > 0) ('Money in', data.income, _incomeColor),
+        if (data.earned > 0) ('Income', data.earned, _incomeColor),
+        if (data.received > 0) ('From people', data.received, Cat.received.color),
         if (data.fromBalance > 0) ('From your balance', data.fromBalance, _balanceColor),
       ];
 
@@ -50,7 +51,8 @@ class FlowChart extends StatelessWidget {
         child: Text('Not enough data for this period', style: TextStyle(color: AppColors.muted)),
       );
     }
-    final height = math.max(220.0, right.length * 34.0);
+    // Room for every label: at least 40px per row on the busier side.
+    final height = math.max(220.0, math.max(right.length, left.length * 2) * 40.0);
     return SizedBox(
       height: height,
       width: double.infinity,
@@ -124,24 +126,35 @@ class _FlowPainter extends CustomPainter {
       ry += h + _gap;
     }
 
-    // Right labels, nudged apart so they never overlap.
-    const minGap = 30.0;
-    for (var i = 1; i < labelYs.length; i++) {
-      if (labelYs[i] - labelYs[i - 1] < minGap) labelYs[i] = labelYs[i - 1] + minGap;
-    }
-    final overflow = labelYs.isEmpty ? 0 : labelYs.last + 14 - size.height;
+    // Right labels: spaced at least [minGap] apart, kept inside the chart.
+    _spread(labelYs, size.height);
     for (var i = 0; i < labelYs.length; i++) {
       final (name, v, _) = right[i];
-      final yy = labelYs[i] - (overflow > 0 ? overflow * i / math.max(1, labelYs.length - 1) : 0);
-      _label(canvas, Offset(rightX + _barW + 8, yy), name, pula(v, decimals: false), size.width - rightX - _barW - 8);
+      _label(canvas, Offset(rightX + _barW + 8, labelYs[i]), name, pula(v, decimals: false),
+          size.width - rightX - _barW - 8);
     }
 
-    // Left labels inside the band area, next to their node.
+    // Left labels next to their node, same spacing rules.
+    final leftYs = [for (final (top, bottom) in leftSpans) (top + bottom) / 2];
+    _spread(leftYs, size.height);
     for (var i = 0; i < left.length; i++) {
       final (name, v, _) = left[i];
-      final (top, bottom) = leftSpans[i];
-      final yy = math.min(math.max((top + bottom) / 2, 14.0), size.height - 14);
-      _label(canvas, Offset(leftX + _barW + 6, yy), name, pula(v, decimals: false), rightX - _barW - 12, onBand: true);
+      _label(canvas, Offset(leftX + _barW + 6, leftYs[i]), name, pula(v, decimals: false), rightX - _barW - 12,
+          onBand: true);
+    }
+  }
+
+  /// Moves label centres so neighbours are at least [minGap] apart and all fit
+  /// in [0, height]: a downward pass, then an upward pass from the bottom.
+  static void _spread(List<double> ys, double height) {
+    const minGap = 34.0, half = 16.0;
+    for (var i = 0; i < ys.length; i++) {
+      final lo = i == 0 ? half : ys[i - 1] + minGap;
+      if (ys[i] < lo) ys[i] = lo;
+    }
+    for (var i = ys.length - 1; i >= 0; i--) {
+      final hi = i == ys.length - 1 ? height - half : ys[i + 1] - minGap;
+      if (ys[i] > hi) ys[i] = hi;
     }
   }
 

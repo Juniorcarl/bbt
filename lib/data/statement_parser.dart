@@ -13,7 +13,11 @@ class ParsedStatement {
   final String? accountTail; // last 4 digits
   final double? openingBalance;
   final double? closingBalance;
-  const ParsedStatement(this.txns, {this.bank, this.accountTail, this.openingBalance, this.closingBalance});
+
+  /// Total fees/charges the statement itself reports in its summary, if any.
+  final double? statedCharges;
+  const ParsedStatement(this.txns,
+      {this.bank, this.accountTail, this.openingBalance, this.closingBalance, this.statedCharges});
 
   /// Lines whose amount didn't match the change in running balance.
   int get flaggedCount => txns.where((t) => t.flagged).length;
@@ -259,6 +263,14 @@ const _balanceMarkers = [
   'brought forward', 'carried forward', 'balance b/f', 'balance c/f', 'bal b/f', 'bal c/f',
 ];
 
+/// Fee lines in a statement's summary block. Only figures directly after the
+/// words count, so "Service Fees 190.25 Dr" → 190.25.
+final _chargeSummaryRe = RegExp(
+  r'\b(service fees|bank charges|cash deposit fees|cash handling fees|account fees|monthly fees|total fees|total charges)'
+  r'\s*:?\s*(\d{1,3}(?:,\d{3})*\.\d{2})\s*(?:dr|cr)?',
+  caseSensitive: false,
+);
+
 const _headerWords = ['date', 'description', 'details', 'balance', 'debit', 'credit', 'amount'];
 
 // ---------------------------------------------------------------------------
@@ -292,6 +304,7 @@ ParsedStatement parseStatementText(String text) {
   var lines = <_Line>[];
   double? openingMarker;
   double? closingMarker;
+  double? statedCharges;
   int? lastMonth;
   var yearShift = 0;
 
@@ -300,12 +313,24 @@ ParsedStatement parseStatementText(String text) {
     if (line.length < 8) continue;
     final lower = line.toLowerCase();
 
-    // Opening / closing balance lines.
-    if (_balanceMarkers.any(lower.contains)) {
-      final a = _amounts(line);
+    // Bank charges summary ("Service Fees 190.25 Dr", "Bank charges 45.00").
+    if (_dateAtStart(line, year) == null) {
+      for (final m in _chargeSummaryRe.allMatches(line)) {
+        final v = double.parse(m[2]!.replaceAll(',', ''));
+        statedCharges = (statedCharges ?? 0) + v;
+      }
+    }
+
+    // Opening / closing balance lines. Summary blocks often put several
+    // figures on one line ("Opening Balance 11.08 Cr  Service Fees 190.25 Dr"),
+    // so take the first amount *after* the words, not the last on the line.
+    final marker = _balanceMarkers.where(lower.contains).firstOrNull;
+    if (marker != null) {
+      final after = lower.indexOf(marker) + marker.length;
+      final a = _amounts(line).where((x) => x.start >= after).toList();
       if (a.isNotEmpty) {
-        final b = a.last.signedOrPositive;
-        if (lower.contains('closing') || lower.contains('carried')) {
+        final b = a.first.signedOrPositive;
+        if (marker.contains('closing') || marker.contains('carried') || marker.contains('c/f')) {
           closingMarker = b;
         } else {
           openingMarker ??= b;
@@ -354,7 +379,8 @@ ParsedStatement parseStatementText(String text) {
   for (final l in lines) {
     final r = _read(l, prev);
     if (r == null || r.amount == 0) continue;
-    final desc = l.rest.substring(0, l.amts[r.amountIdx].start).replaceAll(RegExp(r'\s+'), ' ').trim();
+    var desc = l.rest.substring(0, l.amts[r.amountIdx].start).replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (desc.isEmpty) desc = kNoDescription;
     if (txns.isEmpty && r.balance != null) firstOpening = r.balance! - r.amount;
     txns.add(_txn(desc, l.date, r.amount, fee: r.fee, balance: r.balance, flagged: !r.reconciled));
     if (r.balance != null) prev = r.balance;
@@ -366,6 +392,7 @@ ParsedStatement parseStatementText(String text) {
     accountTail: _detectAccountTail(text),
     openingBalance: _round(openingMarker ?? firstOpening),
     closingBalance: _round(closingMarker ?? prev),
+    statedCharges: _round(statedCharges),
   );
 }
 
@@ -419,7 +446,8 @@ _Reading? _read(_Line l, double? prev) {
 Txn _txn(String desc, DateTime date, double amount, {double fee = 0, double? balance, bool flagged = false}) {
   final (cat, sub) = categorize(desc, amount);
   final source = sub == 'Uncategorised' ? CatSource.none : CatSource.rule;
-  return Txn(cleanName(desc), cat, sub, date, amount,
+  final name = desc == kNoDescription ? (amount < 0 ? 'Bank fee' : 'Bank entry') : cleanName(desc);
+  return Txn(name, cat, sub, date, amount,
       raw: desc, source: source, fee: fee, balance: balance, flagged: flagged);
 }
 

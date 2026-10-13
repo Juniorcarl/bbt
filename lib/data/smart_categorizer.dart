@@ -137,10 +137,15 @@ class SmartCategorizer {
     }
 
     // 3. Money in.
-    if (amount > 0) return CategoryGuess(Cat.income, incomeKind(text), CatSource.rule, 1);
+    if (amount > 0) {
+      final (cat, sub) = moneyIn(text);
+      return CategoryGuess(cat, sub, CatSource.rule, 1);
+    }
 
-    // 4. Bank charges.
-    if (isChargeText(text)) return const CategoryGuess(Cat.charges, 'Bank charges', CatSource.rule, 1);
+    // 4. Bank charges (including lines the bank posted with no description).
+    if (isChargeText(text) || hasNoDescription(text)) {
+      return const CategoryGuess(Cat.charges, 'Bank charges', CatSource.rule, 1);
+    }
 
     // 5. Sending to / withdrawing via the user's own phone = cash for themselves.
     final phone = ownPhone;

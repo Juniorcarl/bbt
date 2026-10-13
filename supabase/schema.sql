@@ -39,6 +39,7 @@ create table if not exists public.statements (
   opening_balance numeric(14, 2),
   closing_balance numeric(14, 2),
   flagged_lines   int not null default 0,
+  stated_charges  numeric(14, 2),             -- fees total from the statement's own summary
   period_start    date,
   period_end      date,
   txn_count       int not null default 0,

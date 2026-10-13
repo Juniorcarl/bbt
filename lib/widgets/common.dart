@@ -138,7 +138,8 @@ Future<void> showCategorySheet(BuildContext context, Txn t) async {
                   CatSource.rule => switch (t.cat) {
                       Cat.transfer => 'Money moved between your own accounts. Not counted as income or spending.',
                       Cat.charges => 'A bank fee or charge.',
-                      Cat.income => 'Money that came in.',
+                      Cat.income => 'Income: salary, allowance, interest or a refund.',
+                      Cat.received => 'Money someone sent you. Counted as money in, not as income.',
                       _ => 'Matched a known merchant keyword.',
                     },
                   CatSource.none => "bbt doesn't recognise this yet.",
@@ -302,7 +303,7 @@ class MonthChips extends StatelessWidget {
       );
 }
 
-/// Month-by-month spending and money in. Tap a row to open that month.
+/// Money in, money out and what was left, for each month. Tap a month to open it.
 class MonthBreakdown extends StatelessWidget {
   const MonthBreakdown({super.key});
 
@@ -311,43 +312,69 @@ class MonthBreakdown extends StatelessWidget {
 
   Widget _build() {
     final sums = store.monthSummaries;
-    final maxSpent = sums.fold(0.0, (a, s) => s.spent > a ? s.spent : a);
     return BCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Month by month',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
         const SizedBox(height: 4),
-        Text('Average ${pula(store.avgMonthlySpent, decimals: false)} spent a month',
+        Text('Average ${pula(store.avgMonthlySpent, decimals: false)} out a month · tap a month to open it',
             style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-        const SizedBox(height: 8),
-        for (final s in sums)
+        const SizedBox(height: 10),
+        const Row(children: [
+          Expanded(flex: 4, child: Text('Month', style: _head)),
+          Expanded(flex: 3, child: Text('In', textAlign: TextAlign.right, style: _head)),
+          Expanded(flex: 3, child: Text('Out', textAlign: TextAlign.right, style: _head)),
+          Expanded(flex: 3, child: Text('Left', textAlign: TextAlign.right, style: _head)),
+        ]),
+        const Divider(height: 14),
+        for (final m in sums)
           InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => store.month = s.month,
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => store.month = m.month,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Column(children: [
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Expanded(
+                    flex: 4,
                     child: Text(
-                      store.coversMonth(s.month) ? monthYear(s.month) : '${monthYear(s.month)} (part)',
+                      store.coversMonth(m.month) ? monthLong(m.month) : '${monthLong(m.month)} (part)',
                       style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
                     ),
                   ),
-                  Text(pula(-s.spent, decimals: false), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(width: 12),
-                  Text(pula(s.income, sign: true, decimals: false),
-                      style: const TextStyle(color: AppColors.income, fontSize: 12)),
-                ]),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: maxSpent == 0 ? 0.0 : s.spent / maxSpent,
-                    minHeight: 6,
-                    backgroundColor: AppColors.primary.withValues(alpha: 0.08),
+                  Expanded(
+                    flex: 3,
+                    child: Text(pula(m.income, decimals: false),
+                        textAlign: TextAlign.right, style: const TextStyle(color: AppColors.income)),
                   ),
-                ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(pula(m.spent, decimals: false), textAlign: TextAlign.right),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      pula(m.net, decimals: false),
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: m.net >= 0 ? const Color(0xFF5BB0E8) : const Color(0xFFD0573F),
+                      ),
+                    ),
+                  ),
+                ]),
+                if (m.charges > 0 || m.movedToOwn.abs() >= 0.01)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      [
+                        if (m.charges > 0) 'incl. ${pula(m.charges)} bank charges',
+                        if (m.movedToOwn >= 0.01) '${pula(m.movedToOwn, decimals: false)} moved to your accounts',
+                        if (m.movedToOwn <= -0.01) '${pula(-m.movedToOwn, decimals: false)} brought back from your accounts',
+                      ].join(' · '),
+                      style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                    ),
+                  ),
               ]),
             ),
           ),
@@ -355,6 +382,8 @@ class MonthBreakdown extends StatelessWidget {
     );
   }
 }
+
+const _head = TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600);
 
 /// Circle with the user's initials.
 class UserAvatar extends StatelessWidget {

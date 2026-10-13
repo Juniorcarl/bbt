@@ -102,13 +102,29 @@ String incomeKind(String desc) {
   return 'Money in';
 }
 
+/// Money in is either *income* (salary, allowance, bursary, interest, refunds)
+/// or money *received from people* (payments from someone, cash someone
+/// deposited for you). Both count as money in; only income is "regular income".
+(Cat, String) moneyIn(String desc) {
+  final kind = incomeKind(desc);
+  return switch (kind) {
+    'From people' => (Cat.received, 'From people'),
+    'Deposit' => (Cat.received, 'Cash deposit'),
+    _ => (Cat.income, kind),
+  };
+}
+
+/// A line the bank printed with no description. Banks post their own entries
+/// (service fees, account fees) this way, so a debit like this is a charge.
+bool hasNoDescription(String desc) => desc.trim().isEmpty || desc == kNoDescription;
+
 /// Context-free category, used when a statement is first read. The app then
 /// re-categorises with more context (own accounts, phone number, what the
 /// user taught) in SmartCategorizer.
 (Cat, String) categorize(String desc, double amount) {
   if (isTransferPhrase(desc)) return (Cat.transfer, 'Between your accounts');
-  if (amount > 0) return (Cat.income, incomeKind(desc));
-  if (isChargeText(desc)) return (Cat.charges, 'Bank charges');
+  if (amount > 0) return moneyIn(desc);
+  if (isChargeText(desc) || hasNoDescription(desc)) return (Cat.charges, 'Bank charges');
   return ruleMatch(desc) ?? (Cat.other, 'Uncategorised');
 }
 
@@ -137,7 +153,7 @@ Iterable<(String, Cat)> get ruleSeeds sync* {
 // ---------------------------------------------------------------------------
 
 final _counterpartyRe = RegExp(
-  r'\b(transfer|trf|payment|pmnt|pmt|paid|send money|sent|eft)\s+(to|from)\s+([A-Za-z][A-Za-z0-9&\-\x27 ]*)',
+  r'\b(transfer|trf|payment|pmnt|pmt|paid|send money|sent|eft)\s+(to|from)\s+([A-Za-z0-9*][A-Za-z0-9*&.\-\x27 ]*)',
   caseSensitive: false,
 );
 
@@ -150,7 +166,8 @@ final _counterpartyRe = RegExp(
   final words = m[3]!
       .toLowerCase()
       .split(RegExp(r'\s+'))
-      .takeWhile((w) => w.isNotEmpty && !RegExp(r'\d').hasMatch(w))
+      // Stop at reference / phone numbers; short codes like "8F" or "P2C" are kept.
+      .takeWhile((w) => w.isNotEmpty && !RegExp(r'\d{4,}').hasMatch(w))
       .take(3)
       .toList();
   if (words.isEmpty) return null;

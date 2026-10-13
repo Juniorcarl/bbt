@@ -13,6 +13,7 @@ class StatementRecord {
   final double? openingBalance;
   final double? closingBalance;
   final int flaggedLines;
+  final double? statedCharges;
   final DateTime? periodStart;
   final DateTime? periodEnd;
   final int txnCount;
@@ -26,6 +27,7 @@ class StatementRecord {
     this.openingBalance,
     this.closingBalance,
     this.flaggedLines = 0,
+    this.statedCharges,
     this.periodStart,
     this.periodEnd,
     required this.txnCount,
@@ -40,6 +42,7 @@ class StatementRecord {
         openingBalance: (r['opening_balance'] as num?)?.toDouble(),
         closingBalance: (r['closing_balance'] as num?)?.toDouble(),
         flaggedLines: (r['flagged_lines'] as num?)?.toInt() ?? 0,
+        statedCharges: (r['stated_charges'] as num?)?.toDouble(),
         periodStart: r['period_start'] == null ? null : DateTime.parse(r['period_start'] as String),
         periodEnd: r['period_end'] == null ? null : DateTime.parse(r['period_end'] as String),
         txnCount: (r['txn_count'] as num?)?.toInt() ?? 0,
@@ -157,6 +160,7 @@ class Backend {
           'opening_balance': s.openingBalance,
           'closing_balance': s.closingBalance,
           'flagged_lines': s.flaggedCount,
+          'stated_charges': s.statedCharges,
           'period_start': dates.isEmpty ? null : _day(dates.first),
           'period_end': dates.isEmpty ? null : _day(dates.last),
           'txn_count': txns.length,
