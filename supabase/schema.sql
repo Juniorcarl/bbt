@@ -5,6 +5,8 @@ create table if not exists public.profiles (
   phone             text not null default '',
   own_accounts      text[] not null default '{}',   -- counterparties confirmed as the user's own accounts
   not_own_accounts  text[] not null default '{}',
+  planned_income    numeric(14, 2),                 -- monthly income the user budgets with
+  planned_savings   numeric(14, 2),                 -- monthly savings goal
   created_at  timestamptz not null default now()
 );
 

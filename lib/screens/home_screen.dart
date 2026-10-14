@@ -90,7 +90,7 @@ class HomeScreen extends StatelessWidget {
         child: Row(children: [
           const Icon(Icons.auto_awesome, color: AppColors.primary),
           const SizedBox(width: 10),
-          Expanded(child: Text(store.insight, style: const TextStyle(color: AppColors.ink))),
+          Expanded(child: Text(store.homeInsight, style: const TextStyle(color: AppColors.ink))),
         ]),
       ),
       const SizedBox(height: 18),

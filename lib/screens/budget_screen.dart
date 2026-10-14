@@ -5,6 +5,7 @@ import '../data/spending_store.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'budget_planner_screen.dart';
 
 /// Monthly limits per category, saved to the user's account.
 class BudgetScreen extends StatelessWidget {
@@ -22,9 +23,11 @@ class BudgetScreen extends StatelessWidget {
     // Limits are monthly, so "All months" compares against the monthly average.
     final perMonth = store.periodMonths;
     // Compare limits with *regular* income (salary, allowance…), not one-offs.
+    // Your own plan comes first; otherwise regular income, otherwise all money in.
     final regular = store.monthRegularIncome / perMonth;
-    final usingRegular = regular > 0;
-    final income = usingRegular ? regular : store.monthIncome / perMonth;
+    final usingPlan = store.hasPlan;
+    final usingRegular = !usingPlan && regular > 0;
+    final income = usingPlan ? store.plannedIncome! : (usingRegular ? regular : store.monthIncome / perMonth);
     final spend = {for (final e in store.categorySpend.entries) e.key: e.value / perMonth};
     final averaged = store.allMonths && store.isMultiMonth;
 
@@ -39,6 +42,8 @@ class BudgetScreen extends StatelessWidget {
           const MonthChips(),
         ],
         const SizedBox(height: 16),
+        const _PlanCard(),
+        const SizedBox(height: 14),
         if (!store.hasData)
           EmptyState(onUpload: () => importStatement(context))
         else ...[
@@ -62,7 +67,11 @@ class BudgetScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 18),
               Row(children: [
-                _Stat(usingRegular ? 'Regular income' : (averaged ? 'Avg. money in' : 'Money in'), income),
+                _Stat(
+                    usingPlan
+                        ? 'Planned income'
+                        : (usingRegular ? 'Regular income' : (averaged ? 'Avg. money in' : 'Money in')),
+                    income),
                 _Stat('Total limits', planned),
                 _Stat('Left to save', income - planned),
               ]),
@@ -218,6 +227,70 @@ class _BudgetRow extends StatelessWidget {
           ],
         ]),
       ),
+    );
+  }
+}
+
+/// "Make a budget" call to action, or a summary of the user's plan.
+class _PlanCard extends StatelessWidget {
+  const _PlanCard();
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(listenable: store, builder: (context, _) => _build(context));
+
+  Widget _build(BuildContext context) {
+    void open() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BudgetPlannerScreen()));
+    if (!store.hasPlan) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: const LinearGradient(colors: [Color(0xFF141821), Color(0xFF2A303C)]),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Make a budget',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          const Text(
+            'Enter what you get each month and decide where every pula goes.',
+            style: TextStyle(color: Color(0xFFB9C2D0)),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: open,
+            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AppColors.ink),
+            child: const Text('Start'),
+          ),
+        ]),
+      );
+    }
+    final income = store.plannedIncome!;
+    final savings = store.plannedSavings ?? 0;
+    final assigned = store.budgets.values.fold(0.0, (a, b) => a + b);
+    final left = income - savings - assigned;
+    return BCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(
+            child: Text('Your budget plan',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
+          ),
+          TextButton(onPressed: open, child: const Text('Edit')),
+        ]),
+        Row(children: [
+          _Stat('Income', income),
+          _Stat('Savings goal', savings),
+          _Stat('For spending', assigned),
+        ]),
+        if (left.abs() >= 1) ...[
+          const SizedBox(height: 8),
+          Text(
+            left > 0 ? '${pula(left, decimals: false)} not given a job yet' : 'Planned ${pula(-left, decimals: false)} more than you earn',
+            style: TextStyle(fontSize: 12, color: left > 0 ? AppColors.primary : const Color(0xFFD0573F)),
+          ),
+        ],
+      ]),
     );
   }
 }

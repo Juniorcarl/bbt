@@ -269,4 +269,30 @@ Closing Balance 37.50 Cr      Cash Deposit Fees 0.50 Dr
     expect(food[3], closeTo(94.90, 0.001)); // 4 June
     expect(store.dailyAmounts(june, moneyIn: true).fold(0.0, (a, b) => a + b), closeTo(1750.00, 0.001));
   });
+
+  test('pie can show one month or all months', () {
+    final store = _storeFor(parseStatementText("""
+2026-04-01 Opening balance 1000.00
+2026-04-05 Grocer Mart -100.00 900.00
+2026-05-05 Grocer Mart -40.00 860.00
+2026-05-06 Uber trip -20.00 840.00
+"""));
+    expect(store.categorySpendFor(null)[Cat.food], 140.00);
+    expect(store.categorySpendFor(DateTime(2026, 5))[Cat.food], 40.00);
+    expect(store.categorySpendFor(DateTime(2026, 4)).containsKey(Cat.transport), isFalse);
+  });
+
+  test('home insight never states what was left over', () {
+    final store = _storeFor(parseStatementText(fnbStyle));
+    expect(store.homeInsight.toLowerCase(), isNot(contains('kept')));
+    expect(store.homeInsight.toLowerCase(), isNot(contains('left')));
+  });
+
+  test('a budget plan replaces the limits and sets planned income', () async {
+    final store = _storeFor(parseStatementText(fnbStyle));
+    await store.saveBudgetPlan(3000, 600, {Cat.food: 800, Cat.transport: 0, Cat.bills: 400});
+    expect(store.hasPlan, isTrue);
+    expect(store.plannedIncome, 3000);
+    expect(store.budgets, {Cat.food: 800.0, Cat.bills: 400.0}); // zero means no limit
+  });
 }

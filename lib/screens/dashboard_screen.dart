@@ -4,6 +4,7 @@ import '../data/models.dart';
 import '../data/spending_store.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
+import '../widgets/category_pie.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
 import '../widgets/month_compare.dart';
@@ -42,8 +43,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Widget> _content() {
     final bars = store.bars(_mode);
     final maxV = bars.values.fold(0.0, (a, b) => a > b ? a : b);
-    final cats = store.categorySpend;
-    final total = cats.values.fold(0.0, (a, b) => a + b);
     final change = store.changeVsPrev;
 
     final income = store.monthIncome;
@@ -188,51 +187,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ]),
       ),
       const SizedBox(height: 14),
-      BCard(
-        child: Column(children: [
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Money out by category',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.ink)),
-          ),
-          const SizedBox(height: 12),
-          if (cats.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('No spending this month', style: TextStyle(color: AppColors.muted)),
-            )
-          else ...[
-            DonutChart(
-              data: cats,
-              center: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('Total', style: TextStyle(color: AppColors.muted)),
-                Text(pula(total, decimals: false), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            for (final e in cats.entries)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(color: e.key.color.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(12)),
-                    child: Icon(e.key.icon, size: 18),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(e.key.label, style: const TextStyle(fontWeight: FontWeight.w600))),
-                  Text(pula(e.value, decimals: false), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  SizedBox(
-                    width: 48,
-                    child: Text('${(e.value / total * 100).round()}%',
-                        textAlign: TextAlign.right, style: const TextStyle(color: AppColors.muted)),
-                  ),
-                ]),
-              ),
-          ],
-        ]),
-      ),
+      const CategoryPieCard(),
     ];
   }
 }

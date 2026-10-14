@@ -56,7 +56,10 @@ class Profile {
   final String phone;
   final Set<String> ownAccounts;
   final Set<String> notOwnAccounts;
-  const Profile(this.name, this.phone, this.ownAccounts, this.notOwnAccounts);
+  final double? plannedIncome;
+  final double? plannedSavings;
+  const Profile(this.name, this.phone, this.ownAccounts, this.notOwnAccounts,
+      {this.plannedIncome, this.plannedSavings});
 }
 
 /// Result of saving a statement.
@@ -79,7 +82,7 @@ class Backend {
   Future<Profile> fetchProfile() async {
     final row = await _db
         .from('profiles')
-        .select('full_name, phone, own_accounts, not_own_accounts')
+        .select('full_name, phone, own_accounts, not_own_accounts, planned_income, planned_savings')
         .eq('id', _uid)
         .maybeSingle();
     var name = (row?['full_name'] as String?)?.trim() ?? '';
@@ -90,7 +93,21 @@ class Backend {
       (row?['phone'] as String?) ?? '',
       set(row?['own_accounts']),
       set(row?['not_own_accounts']),
+      plannedIncome: (row?['planned_income'] as num?)?.toDouble(),
+      plannedSavings: (row?['planned_savings'] as num?)?.toDouble(),
     );
+  }
+
+  /// Saves the whole budget plan: income, savings goal and every category limit.
+  Future<void> saveBudgetPlan(double income, double savings, Map<Cat, double> limits) async {
+    await _db.from('profiles').update({'planned_income': income, 'planned_savings': savings}).eq('id', _uid);
+    await _db.from('budgets').delete().eq('user_id', _uid);
+    final rows = [
+      for (final e in limits.entries)
+        if (e.value > 0) {'user_id': _uid, 'category': e.key.name, 'monthly_limit': e.value},
+    ];
+    if (rows.isNotEmpty) await _db.from('budgets').insert(rows);
+    await log('budget_plan_saved', {'income': income, 'savings': savings, 'categories': rows.length});
   }
 
   Future<void> updatePhone(String phone) async {

@@ -124,6 +124,8 @@ class SpendingStore extends ChangeNotifier {
       final profile = results[4] as Profile;
       userName = profile.name;
       phone = profile.phone;
+      plannedIncome = profile.plannedIncome;
+      plannedSavings = profile.plannedSavings;
       confirmedOwn = profile.ownAccounts;
       rejectedOwn = profile.notOwnAccounts;
       _setTxns(_contextual(results[1] as List<Txn>));
@@ -145,6 +147,7 @@ class SpendingStore extends ChangeNotifier {
     statements = const [];
     budgets = const {};
     userName = userEmail = phone = '';
+    plannedIncome = plannedSavings = null;
     confirmedOwn = {};
     rejectedOwn = {};
     _detectedOwn = {};
@@ -323,6 +326,19 @@ class SpendingStore extends ChangeNotifier {
   }
 
   // ---- Budgets --------------------------------------------------------------
+
+  /// The user's own budget plan (null = not made yet).
+  double? plannedIncome;
+  double? plannedSavings;
+  bool get hasPlan => (plannedIncome ?? 0) > 0;
+
+  Future<void> saveBudgetPlan(double income, double savings, Map<Cat, double> limits) async {
+    await _db?.saveBudgetPlan(income, savings, limits);
+    plannedIncome = income;
+    plannedSavings = savings;
+    budgets = {for (final e in limits.entries) if (e.value > 0) e.key: e.value};
+    notifyListeners();
+  }
 
   Future<void> setBudget(Cat cat, double? limit) async {
     await _db?.setBudget(cat, limit);
@@ -636,9 +652,14 @@ class SpendingStore extends ChangeNotifier {
 
   /// Money out per category (spending + bank charges), biggest first.
   /// Income and transfers are excluded.
-  Map<Cat, double> get categorySpend {
+  Map<Cat, double> get categorySpend => categorySpendIn(monthTxns);
+
+  /// Same, for one month ([month] null = every month in the data).
+  Map<Cat, double> categorySpendFor(DateTime? month) => categorySpendIn(month == null ? _txns : txnsIn(month));
+
+  Map<Cat, double> categorySpendIn(Iterable<Txn> txns) {
     final m = <Cat, double>{};
-    for (final t in monthTxns) {
+    for (final t in txns) {
       if (!t.cat.isOutflow) continue;
       m[t.cat] = (m[t.cat] ?? 0) - t.amount;
     }
@@ -716,6 +737,22 @@ class SpendingStore extends ChangeNotifier {
         ? ''
         : ' ${(change.abs() * 100).round()}% ${change < 0 ? 'less' : 'more'} spending than last month.';
     return '$net$trend $topLine$charges';
+  }
+
+  /// Home's one-liner: what money went on, without the left-over sum.
+  String get homeInsight {
+    if (!hasData) return 'Upload a statement to see where your money goes.';
+    final cats = categorySpend;
+    if (cats.isEmpty) return 'No spending recorded in $periodLabel.';
+    final spent = monthSpent;
+    final top = cats.entries.first;
+    final share = spent <= 0 ? 0 : (top.value / spent * 100).round();
+    final change = changeVsPrev;
+    final trend = change == null || (change.abs() * 100).round() == 0
+        ? ''
+        : ' ${(change.abs() * 100).round()}% ${change < 0 ? 'less' : 'more'} spending than last month.';
+    final charges = monthCharges > 0 ? ' Bank charges: ${pula(monthCharges, decimals: false)}.' : '';
+    return '${top.key.label} is your biggest at $share% (${pula(top.value, decimals: false)}).$trend$charges';
   }
 
   /// Shown after an upload so the user can check the dates were read right.
