@@ -52,12 +52,6 @@ class HomeScreen extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       const _WalletCard(),
-      const SizedBox(height: 18),
-      Row(children: [
-        _Action(Icons.upload_rounded, 'Upload', () => importStatement(context)),
-        _Action(Icons.insights_rounded, 'Insights', () => appTab.value = 1),
-        _Action(Icons.track_changes_rounded, 'Budget', () => appTab.value = 2),
-      ]),
       if (store.isMultiMonth) ...[
         const SizedBox(height: 18),
         const MonthChips(),
@@ -168,8 +162,7 @@ class _CircleButton extends StatelessWidget {
       );
 }
 
-/// Dark "card": bank, account's last digits and this period's money in/out.
-/// Deliberately never shows the account balance.
+/// Dark card: bank, last digits of the account, and this period's money in and out.
 class _WalletCard extends StatelessWidget {
   const _WalletCard();
 
@@ -179,7 +172,6 @@ class _WalletCard extends StatelessWidget {
   Widget _build() {
     final st = store.latestStatement;
     final tail = st?.accountTail;
-    final left = store.monthIncome - store.monthSpent;
     const light = Color(0xFFB9C2D0);
     return Container(
       width: double.infinity,
@@ -205,57 +197,38 @@ class _WalletCard extends StatelessWidget {
           const Text('bbt.', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
         ]),
         const SizedBox(height: 18),
-        Text('Money out · ${store.periodLabel}', style: const TextStyle(color: light, fontSize: 12)),
-        const SizedBox(height: 2),
-        FittedBox(
-          child: Text(pula(store.monthSpent),
-              style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
-        ),
+        Row(children: [
+          Expanded(child: _Figure('Money in', store.monthIncome, const Color(0xFF8FE0B4))),
+          Expanded(child: _Figure('Money out', store.monthSpent, Colors.white)),
+        ]),
         const SizedBox(height: 18),
         Row(children: [
           Expanded(
             child: Text(tail == null ? '' : '••••  ••••  $tail',
                 style: const TextStyle(color: light, letterSpacing: 2, fontSize: 13)),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('In ${pula(store.monthIncome, decimals: false)}',
-                style: const TextStyle(color: Color(0xFF8FE0B4), fontSize: 12, fontWeight: FontWeight.w600)),
-            Text('${left >= 0 ? 'Left' : 'Over'} ${pula(left.abs(), decimals: false)}',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-          ]),
+          Text(store.periodLabel, style: const TextStyle(color: light, fontSize: 12)),
         ]),
       ]),
     );
   }
 }
 
-class _Action extends StatelessWidget {
-  final IconData icon;
+class _Figure extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
-  const _Action(this.icon, this.label, this.onTap);
+  final double value;
+  final Color color;
+  const _Figure(this.label, this.value, this.color);
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Column(children: [
-            Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE6ECF2)),
-              ),
-              child: Icon(icon, color: AppColors.ink),
-            ),
-            const SizedBox(height: 6),
-            Text(label, style: const TextStyle(fontSize: 12, color: AppColors.ink, fontWeight: FontWeight.w600)),
-          ]),
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(color: Color(0xFFB9C2D0), fontSize: 12)),
+        const SizedBox(height: 2),
+        FittedBox(
+          child: Text(pula(value, decimals: false),
+              style: TextStyle(color: color, fontSize: 26, fontWeight: FontWeight.w800)),
         ),
-      );
+      ]);
 }
 
 /// "Are these your own accounts?" for transfer names bbt detected.
