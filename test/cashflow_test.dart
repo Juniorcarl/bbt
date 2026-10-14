@@ -258,4 +258,15 @@ Closing Balance 37.50 Cr      Cash Deposit Fees 0.50 Dr
       expect(june.movedToOwn, closeTo(210.00, 0.001));
     });
   });
+
+  test('month comparison: daily amounts per category add up to the month', () {
+    final store = _storeFor(parseStatementText(fnbStyle));
+    final june = DateTime(2026, 6);
+    final allOut = store.dailyAmounts(june);
+    expect(allOut.length, 30);
+    expect(allOut.fold(0.0, (a, b) => a + b), closeTo(store.monthSpent, 0.001));
+    final food = store.dailyAmounts(june, cat: Cat.food);
+    expect(food[3], closeTo(94.90, 0.001)); // 4 June
+    expect(store.dailyAmounts(june, moneyIn: true).fold(0.0, (a, b) => a + b), closeTo(1750.00, 0.001));
+  });
 }

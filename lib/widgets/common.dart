@@ -4,6 +4,9 @@ import '../data/models.dart';
 import '../data/spending_store.dart';
 import '../theme/app_theme.dart';
 
+/// Which bottom-navigation tab is showing (0 Home, 1 Dashboard, 2 Budget, 3 Profile).
+final appTab = ValueNotifier<int>(0);
+
 class BCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;

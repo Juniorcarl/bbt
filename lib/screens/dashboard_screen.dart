@@ -6,6 +6,7 @@ import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
+import '../widgets/month_compare.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -22,7 +23,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return ListenableBuilder(
       listenable: store,
       builder: (context, _) => SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 110), children: [
           SectionTitle('Cash flow', subtitle: store.hasData ? store.periodLabel : null),
           if (store.isMultiMonth) ...[
             const SizedBox(height: 12),
@@ -84,6 +85,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ]),
       ),
+      if (store.isMultiMonth) ...[
+        const SizedBox(height: 14),
+        const MonthCompareCard(),
+      ],
       if (store.isMultiMonth && store.allMonths) ...[
         const SizedBox(height: 14),
         const MonthBreakdown(),

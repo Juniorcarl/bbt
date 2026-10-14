@@ -29,7 +29,7 @@ class BudgetScreen extends StatelessWidget {
     final averaged = store.allMonths && store.isMultiMonth;
 
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
+      child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 110), children: [
         SectionTitle(
           averaged ? 'Monthly Budget' : (store.hasData ? '${monthLong(store.month)} Budget' : 'Budget'),
           subtitle: averaged ? 'Compared with your average over ${store.periodLabel}' : null,

@@ -12,6 +12,7 @@ import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'services/backend.dart';
 import 'theme/app_theme.dart';
+import 'widgets/common.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -83,28 +84,59 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) => _session == null ? const AuthScreen() : const Shell();
 }
 
-class Shell extends StatefulWidget {
+class Shell extends StatelessWidget {
   const Shell({super.key});
-  @override
-  State<Shell> createState() => _ShellState();
-}
 
-class _ShellState extends State<Shell> {
-  int _i = 0;
   static const _pages = [HomeScreen(), DashboardScreen(), BudgetScreen(), ProfileScreen()];
+  static const _icons = [
+    (Icons.home_outlined, Icons.home_rounded, 'Home'),
+    (Icons.bar_chart_outlined, Icons.bar_chart_rounded, 'Dashboard'),
+    (Icons.track_changes_outlined, Icons.track_changes_rounded, 'Budget'),
+    (Icons.person_outline, Icons.person_rounded, 'Profile'),
+  ];
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: IndexedStack(index: _i, children: _pages),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _i,
-          onDestinationSelected: (i) => setState(() => _i = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-            NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Dashboard'),
-            NavigationDestination(icon: Icon(Icons.track_changes_outlined), selectedIcon: Icon(Icons.track_changes), label: 'Budget'),
-            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
-          ],
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+        valueListenable: appTab,
+        builder: (context, i, _) => Scaffold(
+          extendBody: true,
+          body: IndexedStack(index: i, children: _pages),
+          bottomNavigationBar: SafeArea(
+            minimum: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Container(
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(32),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 24, offset: const Offset(0, 8)),
+                ],
+              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                for (var t = 0; t < _icons.length; t++)
+                  Semantics(
+                    label: _icons[t].$3,
+                    selected: t == i,
+                    button: true,
+                    child: InkResponse(
+                      onTap: () => appTab.value = t,
+                      radius: 28,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: t == i ? AppColors.ink : Colors.transparent,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(t == i ? _icons[t].$2 : _icons[t].$1,
+                            color: t == i ? Colors.white : AppColors.muted),
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
         ),
       );
 }

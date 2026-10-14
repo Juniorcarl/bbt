@@ -1,10 +1,4 @@
--- bbt database schema for Supabase.
--- Run once: Supabase dashboard → SQL Editor → New query → paste all of this → Run.
--- Every table has Row Level Security: each user can only ever see and change their own rows.
 
--- ---------------------------------------------------------------------------
--- Profiles (one per user, created automatically on sign-up)
--- ---------------------------------------------------------------------------
 create table if not exists public.profiles (
   id          uuid primary key references auth.users (id) on delete cascade,
   full_name   text not null default '',

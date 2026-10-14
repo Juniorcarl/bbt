@@ -19,7 +19,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _build(BuildContext context) {
     final cz = store.categoriser;
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 24), children: [
+      child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 110), children: [
         Center(
           child: Column(children: [
             UserAvatar(name: store.userName, email: store.userEmail, radius: 40),

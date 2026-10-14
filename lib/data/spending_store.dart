@@ -514,6 +514,37 @@ class SpendingStore extends ChangeNotifier {
         movedToOwn: _transfers(l, out: true) - _transfers(l, out: false));
   }
 
+  // ---- Month comparison ---------------------------------------------------
+
+  /// Amount per day of month [m] (index 0 = the 1st) for one measure:
+  /// [cat] = a category's money out, or null for all money out; [moneyIn]
+  /// switches to money in instead.
+  List<double> dailyAmounts(DateTime m, {Cat? cat, bool moneyIn = false}) {
+    final out = List<double>.filled(DateTime(m.year, m.month + 1, 0).day, 0);
+    for (final t in txnsIn(m)) {
+      if (moneyIn) {
+        if (t.type == TxnType.income) out[t.date.day - 1] += t.amount;
+      } else if (cat == null ? t.cat.isOutflow : t.cat == cat) {
+        out[t.date.day - 1] -= t.amount;
+      }
+    }
+    return out;
+  }
+
+  /// Months oldest → newest (a stable order, so each month keeps its colour).
+  List<DateTime> get monthsOldestFirst => months.reversed.toList();
+
+  /// Outflow categories that have any money in the data, biggest first.
+  List<Cat> get activeOutflowCats {
+    final totals = <Cat, double>{};
+    for (final t in _txns) {
+      if (t.cat.isOutflow) totals[t.cat] = (totals[t.cat] ?? 0) - t.amount;
+    }
+    return (totals.entries.where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value)))
+        .map((e) => e.key)
+        .toList();
+  }
+
   // ---- Charges ----------------------------------------------------------
 
   /// What the per-transaction fees on the statement were for, in the period:
