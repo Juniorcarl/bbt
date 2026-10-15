@@ -38,6 +38,10 @@ dependencies:
   file_picker: '>=12.0.0 <14.0.0' # v12+ API: FilePicker.pickFile() + readAsBytes()
   syncfusion_flutter_pdf: '>=27.0.0 <40.0.0'
   supabase_flutter: ^2.18.0 # sign-up/login + database
+  # Security
+  local_auth: '>=2.3.0 <3.0.0' # app lock: fingerprint / face / phone PIN
+  flutter_secure_storage: ^10.3.4 # sign-in token in the encrypted keystore
+  shared_preferences: ^2.3.0 # on-phone settings (app lock on/off, last opened)
 
 dev_dependencies:
   flutter_test:

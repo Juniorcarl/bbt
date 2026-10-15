@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../theme/app_theme.dart';
+import 'privacy_screen.dart';
 
 enum _Mode { signIn, signUp, forgot, verifySignup, resetCode }
 
@@ -23,6 +24,7 @@ class _AuthScreenState extends State<AuthScreen> {
   _Mode _mode = _Mode.signIn;
   bool _busy = false;
   bool _showPassword = false;
+  bool _agreed = false;
   String? _error;
   String? _info;
 
@@ -75,7 +77,10 @@ class _AuthScreenState extends State<AuthScreen> {
         final res = await _auth.signUp(
           email: _emailText,
           password: _password.text,
-          data: {'full_name': _name.text.trim()},
+          data: {
+            'full_name': _name.text.trim(),
+            'privacy_accepted_at': DateTime.now().toUtc().toIso8601String(),
+          },
         );
         if (res.session == null) {
           // Email confirmation is switched on in Supabase: ask for the code.
@@ -210,7 +215,12 @@ class _AuthScreenState extends State<AuthScreen> {
       onFieldSubmitted: (_) => _primaryAction(),
       validator: (v) {
         if ((v ?? '').isEmpty) return 'Enter a password';
-        if (_mode != _Mode.signIn && v!.length < 8) return 'Use at least 8 characters';
+        if (_mode != _Mode.signIn) {
+          if (v!.length < 8) return 'Use at least 8 characters';
+          if (!RegExp(r'[A-Za-z]').hasMatch(v) || !RegExp(r'\d').hasMatch(v)) {
+            return 'Use both letters and numbers';
+          }
+        }
         return null;
       },
     );
@@ -239,6 +249,39 @@ class _AuthScreenState extends State<AuthScreen> {
           email,
           gap,
           password,
+          gap,
+          FormField<bool>(
+            initialValue: _agreed,
+            validator: (_) => _agreed ? null : 'Please agree to continue',
+            builder: (field) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Checkbox(
+                  value: _agreed,
+                  onChanged: (v) {
+                    setState(() => _agreed = v ?? false);
+                    field.didChange(v);
+                  },
+                ),
+                Expanded(
+                  child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    const Text('I agree to the '),
+                    GestureDetector(
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute<void>(builder: (_) => const PrivacyScreen())),
+                      child: const Text('privacy notice',
+                          style: TextStyle(color: AppColors.primary, decoration: TextDecoration.underline)),
+                    ),
+                  ]),
+                ),
+              ]),
+              if (field.hasError)
+                Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Text(field.errorText!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+                ),
+            ]),
+          ),
         ],
       _Mode.forgot => [email],
       _Mode.verifySignup => [code],

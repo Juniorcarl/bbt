@@ -5,6 +5,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import 'categorizer.dart';
 import 'models.dart';
+import 'privacy.dart';
 
 /// What we could read out of one bank statement.
 class ParsedStatement {
@@ -443,7 +444,9 @@ _Reading? _read(_Line l, double? prev) {
   return _Reading(b - 1, amt.value * sign, a[b].signedOrPositive, feeAfter(b), prev == null);
 }
 
-Txn _txn(String desc, DateTime date, double amount, {double fee = 0, double? balance, bool flagged = false}) {
+Txn _txn(String printed, DateTime date, double amount, {double fee = 0, double? balance, bool flagged = false}) {
+  // Account and card numbers never leave the parser.
+  final desc = maskPrivate(printed);
   final (cat, sub) = categorize(desc, amount);
   final source = sub == 'Uncategorised' ? CatSource.none : CatSource.rule;
   final name = desc == kNoDescription ? (amount < 0 ? 'Bank fee' : 'Bank entry') : cleanName(desc);

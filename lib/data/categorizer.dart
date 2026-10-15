@@ -199,6 +199,7 @@ const _noisePrefixes = [
 /// Turns "POS PURCHASE CHOPPIES MALL 471396*5328 05 Oct" into "Choppies Mall".
 String cleanName(String desc) {
   var s = desc
+      .replaceAll(RegExp(r'•+\d*'), ' ') // numbers bbt masked (••••5678)
       .replaceAll(RegExp(r'\b\d{4,}[x*#]+\d{2,}\b', caseSensitive: false), ' ') // masked cards 471396*5328
       .replaceAll(RegExp(r'[x*#]{2,}\d{2,}', caseSensitive: false), ' ')
       .replaceAll(RegExp(r'\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b', caseSensitive: false), ' ')

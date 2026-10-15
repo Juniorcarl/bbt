@@ -5,7 +5,9 @@ import '../data/models.dart';
 import '../data/spending_store.dart';
 import '../data/categorizer.dart';
 import '../services/backend.dart';
+import '../services/security.dart';
 import 'books_check_screen.dart';
+import 'privacy_screen.dart';
 import '../services/statement_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -157,15 +159,22 @@ class ProfileScreen extends StatelessWidget {
           ]),
         ),
 
+        if (security.lockSupported || security.isAndroid) ...[
+          const _Header('Security'),
+          const _SecurityCard(),
+        ],
+
         const _Header('Privacy'),
         BCard(
           padding: EdgeInsets.zero,
           child: Column(children: [
-            const ListTile(
-              leading: Icon(Icons.shield_outlined),
-              title: Text('How your data is stored'),
-              subtitle: Text('Statement files are read on your phone and never uploaded. Only the transactions, '
-                  'budgets and category corrections are saved to your account, which only you can access.'),
+            ListTile(
+              leading: const Icon(Icons.shield_outlined),
+              title: const Text('Privacy notice'),
+              subtitle: const Text('What is saved, who can see it and your rights'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context)
+                  .push(MaterialPageRoute<void>(builder: (_) => const PrivacyScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Color(0xFFD0573F)),
@@ -269,7 +278,7 @@ class ProfileScreen extends StatelessWidget {
           controller: controller,
           autofocus: true,
           obscureText: true,
-          decoration: const InputDecoration(labelText: 'At least 8 characters'),
+          decoration: const InputDecoration(labelText: '8+ characters, letters and numbers'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -279,8 +288,9 @@ class ProfileScreen extends StatelessWidget {
     );
     controller.dispose();
     if (pw == null) return;
-    if (pw.length < 8) {
-      messenger.showSnackBar(const SnackBar(content: Text('Password must be at least 8 characters.')));
+    if (pw.length < 8 || !RegExp(r'[A-Za-z]').hasMatch(pw) || !RegExp(r'\d').hasMatch(pw)) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Use at least 8 characters with both letters and numbers.')));
       return;
     }
     try {
@@ -356,4 +366,47 @@ class _StatementTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// App lock and screenshot settings (kept on this phone only).
+class _SecurityCard extends StatelessWidget {
+  const _SecurityCard();
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: security,
+        builder: (context, _) => BCard(
+          padding: EdgeInsets.zero,
+          child: Column(children: [
+            if (security.lockSupported)
+              SwitchListTile(
+                secondary: const Icon(Icons.fingerprint),
+                title: const Text('App lock'),
+                subtitle: Text('Ask for your fingerprint, face or PIN when bbt opens '
+                    'or after ${Security.lockAfter.inMinutes} minute away'),
+                value: security.lockEnabled,
+                onChanged: (on) async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  if (!await security.setLockEnabled(on)) {
+                    messenger.showSnackBar(const SnackBar(content: Text('App lock is still on.')));
+                  }
+                },
+              ),
+            if (security.isAndroid)
+              SwitchListTile(
+                secondary: const Icon(Icons.screenshot_monitor_outlined),
+                title: const Text('Hide from screenshots'),
+                subtitle: const Text('Blocks screenshots and hides bbt in the recent apps list. '
+                    'Turn off briefly if you want to take a screenshot.'),
+                value: security.blockScreenshots,
+                onChanged: security.setBlockScreenshots,
+              ),
+            const ListTile(
+              leading: Icon(Icons.timer_outlined),
+              title: Text('Automatic sign-out'),
+              subtitle: Text('If bbt isn\'t opened for 30 days, you are signed out on this phone.'),
+            ),
+          ]),
+        ),
+      );
 }

@@ -46,7 +46,7 @@ void main() {
     test('reads every line', () => expect(s.txns.length, 16));
 
     test('a fee column after the balance is not mistaken for the balance', () {
-      final p2c = s.txns.firstWhere((t) => t.raw.contains('26772222222'));
+      final p2c = s.txns.firstWhere((t) => t.raw.contains('72222222'));
       expect(p2c.amount, -150.00);
       expect(p2c.balance, 441.08);
       expect(p2c.fee, 3.85);
@@ -79,7 +79,7 @@ void main() {
       final r = parseStatementText(reversed);
       expect(r.txns.length, 16);
       expect(r.difference, 0);
-      expect(r.txns.firstWhere((t) => t.raw.contains('26772222222')).amount, -150.00);
+      expect(r.txns.firstWhere((t) => t.raw.contains('72222222')).amount, -150.00);
     });
 
     test('a line that does not add up is flagged', () {
@@ -108,8 +108,8 @@ void main() {
 
     test('sending to your own number is cash, to someone else is sent to people', () {
       expect(store.suggestedPhone, '71111111'); // from the airtime purchases
-      expect(_find(store, '26771111111 Test User').cat, Cat.cash);
-      expect(_find(store, '26772222222').cat, Cat.people);
+      expect(_find(store, '71111111 Test User').cat, Cat.cash);
+      expect(_find(store, '72222222').cat, Cat.people);
       expect(_find(store, 'Send Money').cat, Cat.people);
       expect(_find(store, 'ATM Cash').cat, Cat.cash);
     });

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -11,15 +12,35 @@ import 'screens/dashboard_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'services/backend.dart';
+import 'services/security.dart';
 import 'theme/app_theme.dart';
+import 'widgets/app_lock.dart';
 import 'widgets/common.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await security.init();
   if (backendConfigured) {
-    await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseKey);
+    // Same key supabase_flutter uses by default, so existing sign-ins carry over.
+    final sessionKey = 'sb-${Uri.parse(supabaseUrl).host.split('.').first}-auth-token';
+    await Supabase.initialize(
+      url: supabaseUrl,
+      publishableKey: supabaseKey,
+      authOptions: FlutterAuthClientOptions(
+        // Phones keep the sign-in token in encrypted storage.
+        localStorage: kIsWeb ? null : SecureSessionStorage(sessionKey),
+      ),
+    );
     store.backend = Backend();
+    // Not opened for a month: sign out so an old, forgotten phone isn't left signed in.
+    final auth = Supabase.instance.client.auth;
+    if (auth.currentSession != null && security.awayTooLong) {
+      try {
+        await auth.signOut(scope: SignOutScope.local);
+      } catch (_) {}
+    }
   }
+  security.markActive();
   runApp(const BbtApp());
 }
 
@@ -31,6 +52,8 @@ class BbtApp extends StatelessWidget {
         title: 'bbt',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
+        // The app lock sits above every screen and dialog.
+        builder: (context, child) => AppLock(child: child ?? const SizedBox()),
         home: backendConfigured ? const AuthGate() : const _NotConfigured(),
       );
 }

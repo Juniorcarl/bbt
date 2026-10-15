@@ -167,3 +167,5 @@ from auth.users u
 left join public.profiles p on p.id = u.id
 order by u.created_at desc;
 revoke all on public.admin_overview from anon, authenticated;
+
+-- After this file, also run 005_security.sql (masking, sign-in-only rules, size limits).

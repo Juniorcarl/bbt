@@ -55,7 +55,7 @@ jobs:
       - run: flutter pub get
 
       # Each build gets a higher version code, so Android accepts it as an update.
-      - run: flutter build apk --release --build-name=1.0.${{ github.run_number }} --build-number=${{ github.run_number }}
+      - run: flutter build apk --release --obfuscate --split-debug-info=build/symbols --build-name=1.0.${{ github.run_number }} --build-number=${{ github.run_number }}
 
       - run: cp build/app/outputs/flutter-apk/app-release.apk bbt.apk
 
