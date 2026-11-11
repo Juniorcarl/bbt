@@ -10,7 +10,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// signing out after a long time away. Everything here stays on the phone.
 class Security extends ChangeNotifier {
   static const _lockKey = 'bbt_app_lock';
-  static const _shotsKey = 'bbt_block_screenshots';
+  // New key name so any previously saved "true" is ignored.
+  static const _shotsKey = 'bbt_block_screenshots_v2';
   static const _activeKey = 'bbt_last_active';
 
   /// Ask to unlock again after the app has been in the background this long.
@@ -31,7 +32,10 @@ class Security extends ChangeNotifier {
 
   bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get lockEnabled => lockSupported && (_prefs?.getBool(_lockKey) ?? true);
-  bool get blockScreenshots => _prefs?.getBool(_shotsKey) ?? true;
+
+  // TEMPORARY: default is false so screenshots work for marketing.
+  // Change back to `?? true` before release.
+  bool get blockScreenshots => _prefs?.getBool(_shotsKey) ?? false;
 
   Future<void> init() async {
     try {
