@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'data/merchant_store.dart';
 import 'data/spending_store.dart';
 import 'screens/auth_screen.dart';
 import 'screens/budget_screen.dart';
@@ -39,6 +40,10 @@ Future<void> main() async {
         await auth.signOut(scope: SignOutScope.local);
       } catch (_) {}
     }
+    // Merchant knowledge base: load the phone's copy, then fetch anything new
+    // from Supabase (about once a day). Runs in the background and never
+    // blocks or breaks start-up, even offline.
+    unawaited(MerchantStore.instance.sync());
   }
   security.markActive();
   runApp(const BbtApp());

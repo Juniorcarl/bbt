@@ -42,6 +42,7 @@ dependencies:
   local_auth: '>=2.3.0 <3.0.0' # app lock: fingerprint / face / phone PIN
   flutter_secure_storage: ^10.3.4 # sign-in token in the encrypted keystore
   shared_preferences: ^2.3.0 # on-phone settings (app lock on/off, last opened)
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
